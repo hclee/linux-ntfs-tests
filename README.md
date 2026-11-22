@@ -87,6 +87,7 @@ its usage with `--help`.
 |---|---|
 | `vm/build_kernel.sh` | builds a kernel for the VM: virtio, 9p, loop and ntfs built in, ntfs3 as a module; `debug` adds KASAN, lockdep, UBSAN |
 | `vm/run_vm.sh`, `vm/init.c`, `vm/vm_shell.py` | boot the kernel in QEMU and run a guest script as root |
+| `vm/apply_patches.sh` | applies lore series (b4), mbox or diff files by URL, or local files to a kernel tree as commits |
 | `vm/check_patches.sh` | per-commit gcc/clang W=1, sparse and checkpatch of a patch series, reporting only what each commit adds |
 | `tests/run_reproducers.sh` | runs the reproducers and prints one line per test |
 | `tests/run_guest_script.sh` | runs one guest script |
@@ -94,6 +95,7 @@ its usage with `--help`.
 | `tests/*.sh` | the guest scripts (reproducers) |
 | `tests/*.c` | C helpers, built by `make -C tests` |
 | `tests/*.py` | helpers; `ntfsdefrag.py` is an independent NTFS parser and offline defragmenter the suites use to check images |
+| `patches/` | proposed kernel fixes the tests were checked against, ready for `vm/apply_patches.sh` |
 
 ## Tests
 
@@ -123,6 +125,37 @@ The suites run by `tests/run_kernel_tests.sh` need a kernel with the fs/ntfs
 online defragmentation series (`NTFS_IOC_MOVE_CLUSTERS`, `FS_IOC_GETFSMAP`);
 `SUITE=online` also needs an `ntfsdefrag` build (`NTFSDEFRAG`, and
 `NTFSDEFRAG_FI` for its fault-injection build).
+
+## Testing a kernel or patches on GitHub
+
+The `test-kernel` workflow builds any kernel, with any patches on top, and
+runs the reproducers on it, with nothing installed locally. On the
+repository's Actions tab pick test-kernel, then Run workflow, and fill in
+what you need; every field has a working default (plain ntfs-next, every
+reproducer, Ubuntu 26.04, debug kernel):
+
+- repo and ref: a kernel git repository and a branch, tag or commit id in it;
+- patches: applied in order, separated by spaces; each is a lore link or
+  message id (b4 fetches the whole series), the URL of an mbox or diff file,
+  or a path in this repository such as `patches/v8-zero-for-a-killed-writer.diff`;
+- tests: reproducer names, `.sh` optional; empty runs all of them;
+- distro and flavour: Ubuntu 26.04, Arch Linux or both; debug or fast kernel.
+
+The same from a shell, here v8 of the short write fix plus the proposed
+change on top of it:
+
+```bash
+gh workflow run test-kernel.yml -R xerrni/linux-ntfs \
+    -f patches="https://lore.kernel.org/all/20261120023504.4134966-1-zhanxusheng1024@gmail.com/ patches/v8-zero-for-a-killed-writer.diff" \
+    -f tests="killed_write_mmap short_write_size"
+```
+
+Starting a run needs write access to the repository, so in a fork first
+enable Actions on the fork's Actions tab. The run's summary page shows the
+commits tested and one result line per test; the guest logs are an artifact
+of the run. A run with a few tests takes about ten minutes with the compiler
+cache warm. Locally the same steps are `vm/apply_patches.sh`,
+`vm/build_kernel.sh` and `tests/run_reproducers.sh`.
 
 ## CI
 

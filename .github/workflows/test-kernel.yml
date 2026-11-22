@@ -1,0 +1,117 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# Run the reproducers on any kernel, with or without patches: Actions ->
+# test-kernel -> Run workflow, or from a shell
+#   gh workflow run test-kernel.yml -R OWNER/linux-ntfs \
+#     -f patches="https://lore.kernel.org/all/MESSAGE-ID/" -f tests="killed_write_mmap"
+# Every field has a working default (plain ntfs-next, every reproducer, Ubuntu
+# 26.04, debug kernel). The run's summary page shows the base commit, the
+# patches applied and one result line per test; the logs are artifacts. In a
+# fork, enable Actions on its Actions tab first.
+name: test-kernel
+run-name: "test-kernel: ${{ inputs.ref }} ${{ inputs.patches != '' && '+ patches' || '' }} (${{ inputs.tests || 'all tests' }})"
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: Kernel git repository
+        default: https://git.kernel.org/pub/scm/linux/kernel/git/linkinjeon/ntfs.git
+      ref:
+        description: Branch, tag or commit id in it
+        default: ntfs-next
+      patches:
+        description: >-
+          Patches to apply in order, separated by spaces: lore links or message
+          ids (the whole series), URLs of mbox or diff files, or paths in this
+          repository (e.g. patches/v8-zero-for-a-killed-writer.diff)
+        default: ""
+      tests:
+        description: Reproducers to run, separated by spaces (e.g. killed_write_mmap short_write_size); empty runs all
+        default: ""
+      distro:
+        description: Distribution the tests run on
+        type: choice
+        options: [ubuntu-26.04, arch, both]
+        default: ubuntu-26.04
+      flavour:
+        description: Kernel build (debug has KASAN, lockdep and UBSAN)
+        type: choice
+        options: [debug, fast]
+        default: debug
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash  # also gives -o pipefail
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: ${{ fromJSON(inputs.distro == 'both' && '["arch", "ubuntu-26.04"]' || format('["{0}"]', inputs.distro)) }}
+    name: test (${{ matrix.distro }})
+    runs-on: ubuntu-26.04
+    container:
+      image: ${{ matrix.distro == 'arch' && 'archlinux:latest' || '' }}
+      options: --device /dev/kvm
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/kernel
+        id: kernel
+        with:
+          distro: ${{ matrix.distro }}
+          repo: ${{ inputs.repo }}
+          ref: ${{ inputs.ref }}
+          patches: ${{ inputs.patches }}
+          flavour: ${{ inputs.flavour }}
+      - name: Reproducers
+        env:
+          DMESG_IGNORE: slab_common.c:111
+          TESTS: ${{ inputs.tests }}
+          REPO: ${{ inputs.repo }}
+          REF: ${{ inputs.ref }}
+          BASE: ${{ steps.kernel.outputs.sha }}
+          FLAVOUR: ${{ inputs.flavour }}
+          DISTRO: ${{ matrix.distro }}
+        run: |
+          export NTFSCK="$RUNNER_TEMP/ntfsprogs-plus-root/sbin/ntfsck"
+          export NTFSINFO="$RUNNER_TEMP/ntfsprogs-plus-root/bin/ntfsinfo"
+          scripts=()
+          for t in $TESTS; do scripts+=("${t%.sh}.sh"); done
+          rc=0
+          tests/run_reproducers.sh "$RUNNER_TEMP/build" repro-out "${scripts[@]}" |
+            tee results.txt || rc=$?
+          verdict="every test passed"
+          [ $rc = 0 ] || verdict="some tests failed (or did not finish)"
+          {
+            echo "## Reproducers on $DISTRO: $verdict"
+            echo
+            echo "Kernel: \`$REF\` of $REPO, base \`$BASE\`, $FLAVOUR build"
+            echo
+            echo "Commits tested, newest first (the shallow clone holds the base and the patches):"
+            echo '```'
+            git -C "$RUNNER_TEMP/ntfs" log --format='%h %s' -n 50
+            echo '```'
+            echo "Results (pass and fail counts, run time, first FAIL line):"
+            echo '```'
+            cat results.txt
+            echo '```'
+            echo "Logs: the reproducer-logs-$DISTRO artifact below."
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $rc
+      - name: Logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: reproducer-logs-${{ matrix.distro }}
+          path: |
+            results.txt
+            repro-out/*.log
+            repro-out/*/*.log
+            repro-out/*/run.out
+          if-no-files-found: ignore
