@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-2.0-or-later
 #
-# Run driver reproducers (guest scripts for run_guest_script.sh) one after
-# another on one kernel and print one line per script: PASS/FAIL counts and
-# the first FAIL line.
+# Run driver reproducers (guest scripts for run_guest_script.sh) on one
+# kernel and print one line per script, in the order given: PASS/FAIL
+# counts, run time in seconds and the first FAIL line.
 #
 #   tests/run_reproducers.sh KERNEL_BUILD_DIR WORKDIR [SCRIPT...]
 #
@@ -11,7 +11,8 @@
 # ntfs3_* ones, which need a kernel with the fs/ntfs3 series, and not the
 # measurement scripts). Each run gets WORKDIR/<script name>/ (shell.log,
 # console.log). The C helpers are built first (make -C tests).
-# Environment: CLUSTERS, MEM, SMP and TIMEOUT pass through to the VM.
+# Environment: CLUSTERS, MEM, SMP and TIMEOUT pass through to the VM. JOBS
+# (default 1) runs that many VMs at once; each takes MEM and SMP vCPUs.
 # Exit status 1 if any script reported a FAIL or did not finish.
 #
 # Example:
@@ -28,22 +29,41 @@ if [ $# = 0 ]; then
 fi
 mkdir -p "$work"
 make -s -C "$here" || exit 2	# the C helpers
-fail=0
-for s in "$@"; do
-	name=${s%.sh}; name=${name##*/}
-	script=$here/${s##*/}
-	"$here/run_guest_script.sh" "$build" "$work/$name" "$script" > "$work/$name.log" 2>&1
-	log=$work/$name/shell.log
+one() {	# one SCRIPT: run it, leave its result line in WORKDIR/NAME.result
+	local name=${1%.sh} p f done_ first t0=$SECONDS
+	name=${name##*/}
+	"$here/run_guest_script.sh" "$build" "$work/$name" "$here/${1##*/}" > "$work/$name.log" 2>&1
+	local log=$work/$name/shell.log
 	p=$(grep -c '^PASS' "$log" 2>/dev/null); f=$(grep -c '^FAIL' "$log" 2>/dev/null)
 	done_=$(grep -c '^### done' "$log" 2>/dev/null)
 	first=$(grep -m1 '^FAIL' "$log" 2>/dev/null)
-	[ "${f:-0}" = 0 ] && [ "${done_:-0}" -gt 0 ] || fail=1
 	[ "${done_:-0}" -gt 0 ] || first="did not finish (see $work/$name.log)"
-	printf '%-32s pass %3s fail %3s %s\n' "$name" "${p:-0}" "${f:-0}" "$first"
+	printf '%-32s pass %3s fail %3s %4ss %s\n' "$name" "${p:-0}" "${f:-0}" \
+		$((SECONDS - t0)) "$first" > "$work/$name.result.tmp"
 	if [ "${done_:-0}" = 0 ]; then	# why, on stderr: stdout is the result list
 		for o in "$work/$name.log" "$work/$name/run.out"; do
-			[ -s "$o" ] && sed "s|^|  ${o##*/}: |" "$o" | tail -n 15 >&2
+			[ -s "$o" ] && sed "s|^|  $name ${o##*/}: |" "$o" | tail -n 15 >&2
 		done
 	fi
+	mv "$work/$name.result.tmp" "$work/$name.result"
+}
+names=()
+for s in "$@"; do n=${s%.sh}; names+=("${n##*/}"); rm -f "$work/${n##*/}.result"; done
+next=0
+flush() {	# print the finished results that come next in order
+	while [ $next -lt ${#names[@]} ] && [ -f "$work/${names[$next]}.result" ]; do
+		cat "$work/${names[$next]}.result"
+		next=$((next + 1))
+	done
+}
+for s in "$@"; do
+	while [ "$(jobs -rp | wc -l)" -ge "${JOBS:-1}" ]; do wait -n; flush; done
+	one "$s" &
+done
+wait
+flush
+fail=0
+for n in "${names[@]}"; do
+	grep -qE ' fail +0 +[0-9]+s $' "$work/$n.result" || fail=1
 done
 exit $fail
