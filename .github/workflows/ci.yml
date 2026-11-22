@@ -135,7 +135,8 @@ jobs:
             https://git.kernel.org/pub/scm/linux/kernel/git/linkinjeon/ntfs.git "$RUNNER_TEMP/ntfs"
           echo "sha=$(git -C "$RUNNER_TEMP/ntfs" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Compiler cache
-        uses: actions/cache@v6
+        id: ccache
+        uses: actions/cache/restore@v6
         with:
           path: ~/.cache/ccache-kernel
           key: ccache-kernel-${{ matrix.distro }}-${{ steps.src.outputs.sha }}
@@ -148,6 +149,14 @@ jobs:
           printf 'max_size = 3G\ncompression = true\nsloppiness = time_macros\n' \
             > ~/.cache/ccache-kernel/ccache.conf
           vm/build_kernel.sh "$RUNNER_TEMP/ntfs" "$RUNNER_TEMP/build" debug
+      # saved right after the build: actions/cache saves only when the whole
+      # job passes, and a reproducer failure would leave every run cold
+      - name: Save the compiler cache
+        if: steps.ccache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/ccache-kernel
+          key: ${{ steps.ccache.outputs.cache-primary-key }}
       - name: Reproducers
         env:
           DMESG_IGNORE: slab_common.c:111
@@ -164,6 +173,8 @@ jobs:
           name: reproducer-logs-${{ matrix.distro }}
           path: |
             ${{ runner.temp }}/repro.txt
+            ${{ runner.temp }}/repro/*.log
+            ${{ runner.temp }}/repro/*/run.out
             ${{ runner.temp }}/repro/*/shell.log
             ${{ runner.temp }}/repro/*/console.log
           if-no-files-found: ignore

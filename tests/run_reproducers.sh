@@ -40,5 +40,10 @@ for s in "$@"; do
 	[ "${f:-0}" = 0 ] && [ "${done_:-0}" -gt 0 ] || fail=1
 	[ "${done_:-0}" -gt 0 ] || first="did not finish (see $work/$name.log)"
 	printf '%-32s pass %3s fail %3s %s\n' "$name" "${p:-0}" "${f:-0}" "$first"
+	if [ "${done_:-0}" = 0 ]; then	# why, on stderr: stdout is the result list
+		for o in "$work/$name.log" "$work/$name/run.out"; do
+			[ -s "$o" ] && sed "s|^|  ${o##*/}: |" "$o" | tail -n 15 >&2
+		done
+	fi
 done
 exit $fail
