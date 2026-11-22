@@ -153,8 +153,8 @@ gh workflow run test-kernel.yml -R xerrni/linux-ntfs \
 Starting a run needs write access to the repository, so in a fork first
 enable Actions on the fork's Actions tab. The run's summary page shows the
 commits tested and one result line per test; the guest logs are an artifact
-of the run. A run with a few tests takes about ten minutes with the compiler
-cache warm. Locally the same steps are `vm/apply_patches.sh`,
+of the run. A run with five tests took five minutes at the time of writing.
+Locally the same steps are `vm/apply_patches.sh`,
 `vm/build_kernel.sh` and `tests/run_reproducers.sh`.
 
 ## CI

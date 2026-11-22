@@ -9,7 +9,7 @@
 # patches applied and one result line per test; the logs are artifacts. In a
 # fork, enable Actions on its Actions tab first.
 name: test-kernel
-run-name: "test-kernel: ${{ inputs.ref }} ${{ inputs.patches != '' && '+ patches' || '' }} (${{ inputs.tests || 'all tests' }})"
+run-name: "test-kernel: ${{ inputs.ref }}${{ inputs.patches != '' && ' + ' || '' }}${{ inputs.patches }} (${{ inputs.tests || 'all tests' }})"
 
 on:
   workflow_dispatch:
