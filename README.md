@@ -133,8 +133,11 @@ and on Ubuntu 26.04, split over four runners per distribution. The results
 job of each distribution fails when a result differs from
 `tests/expected/ntfs-next.txt`: a regression, or a fix that reached
 ntfs-next (then update the file). It runs on pushes to master, on pull
-requests, weekly and by hand (workflow_dispatch). Each runner uploads its
-test logs as an artifact.
+requests, weekly and by hand (workflow_dispatch); changes to Markdown files
+alone start nothing. Each runner uploads its test logs as an artifact. At the
+time of writing a run with a warm compiler cache takes 15 minutes, most of it
+ntfs_compressed_stages, whose run time varies between 5 and 11 minutes from
+runner to runner.
 
 ## Licence
 
