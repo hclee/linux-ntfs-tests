@@ -8,6 +8,14 @@ M=$W/mnt
 mkdir -p "$M"
 echo "### kernel $(uname -r)"
 fail() { echo "FAIL: $*"; }
+mkntfs() {	# the scripts hide its output: keep it in $W/mkntfs-errors.log on failure
+	local out rc
+	out=$(command mkntfs "$@" 2>&1); rc=$?
+	[ $rc = 0 ] || printf 'mkntfs %s: exit %s\n%s\n' "$*" $rc "$out" >> "$W/mkntfs-errors.log"
+	printf '%s' "$out"
+	[ -z "$out" ] || echo
+	return $rc
+}
 mark() { echo "### $*"; echo "### $*" > /dev/kmsg; }
 cluster_size() {	# cluster_size IMG
 	python3 -c "import struct,sys;b=open(sys.argv[1],'rb').read(512);s=b[13];print(struct.unpack_from('<H',b,11)[0]*((1<<(256-s)) if s>128 else s))" "$1"

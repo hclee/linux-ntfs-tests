@@ -176,7 +176,6 @@ jobs:
           path: |
             repro-out.txt
             repro-out/*.log
-            repro-out/*/shell.log
-            repro-out/*/console.log
+            repro-out/*/*.log
             repro-out/*/run.out
           if-no-files-found: ignore
