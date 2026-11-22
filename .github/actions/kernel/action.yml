@@ -1,0 +1,115 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# Everything a reproducer run needs, for the job's distribution: packages and
+# KVM access, ntfsprogs-plus (ntfsck, ntfsinfo) in
+# $RUNNER_TEMP/ntfsprogs-plus-root, the kernel source at REF of REPO in
+# $RUNNER_TEMP/ntfs with PATCHES applied (vm/apply_patches.sh), and the
+# kernel built in $RUNNER_TEMP/build through the shared compiler cache.
+# Used by ci.yml and test-kernel.yml after actions/checkout.
+name: kernel
+description: Install the test tools, fetch, patch and build a kernel for the reproducers
+inputs:
+  distro:
+    description: arch (the job runs in an archlinux container) or ubuntu-26.04
+    required: true
+  repo:
+    description: kernel git repository
+    default: https://git.kernel.org/pub/scm/linux/kernel/git/linkinjeon/ntfs.git
+  ref:
+    description: branch, tag or commit id
+    default: ntfs-next
+  patches:
+    description: what vm/apply_patches.sh takes, separated by spaces or new lines
+    default: ""
+  flavour:
+    description: debug (KASAN, lockdep, UBSAN) or fast
+    default: debug
+  save-cache:
+    description: "true: save the compiler cache after the build"
+    default: "false"
+outputs:
+  sha:
+    description: commit id of REF before the patches
+    value: ${{ steps.src.outputs.sha }}
+runs:
+  using: composite
+  steps:
+    - name: Packages (Arch)
+      if: inputs.distro == 'arch'
+      shell: bash
+      run: |
+        # shellcheck disable=SC2086 # one word per package
+        pacman -Syu --noconfirm --needed qemu-base gcc make cpio python zstd xz bc bison \
+          flex libelf openssl ccache perl kmod pahole ntfs-3g ntfsprogs xfsprogs autoconf \
+          automake libtool pkgconf util-linux-libs gnutls libgcrypt git attr b4
+    - name: Packages and KVM access (Ubuntu)
+      if: inputs.distro != 'arch'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends qemu-system-x86 gcc make libc6-dev \
+          cpio python3 zstd xz-utils bc bison flex libelf-dev libssl-dev ccache perl kmod \
+          dwarves ntfs-3g xfsprogs autoconf automake libtool pkg-config libblkid-dev \
+          uuid-dev libgnutls28-dev libgcrypt20-dev git ca-certificates attr b4
+        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' |
+          sudo tee /etc/udev/rules.d/99-kvm4all.rules
+        sudo udevadm control --reload-rules
+        sudo udevadm trigger --name-match=kvm
+    - name: KVM
+      shell: bash
+      run: test -w /dev/kvm && ls -l /dev/kvm
+    - name: ntfsprogs-plus (ntfsck and ntfsinfo; mkntfs comes from ntfs-3g)
+      shell: bash
+      run: |
+        git clone -q --depth 1 https://github.com/ntfsprogs-plus/ntfsprogs-plus.git "$RUNNER_TEMP/ntfsprogs-plus"
+        cd "$RUNNER_TEMP/ntfsprogs-plus"
+        ./autogen.sh > /dev/null
+        ./configure -q --prefix="$RUNNER_TEMP/ntfsprogs-plus-root"
+        make -s -j"$(nproc)"
+        make -s install > /dev/null
+    - name: Kernel source
+      id: src
+      shell: bash
+      env:
+        REPO: ${{ inputs.repo }}
+        REF: ${{ inputs.ref }}
+      run: |
+        git init -q "$RUNNER_TEMP/ntfs"
+        git -C "$RUNNER_TEMP/ntfs" fetch -q --depth 1 "$REPO" "$REF"
+        git -C "$RUNNER_TEMP/ntfs" checkout -q FETCH_HEAD
+        echo "sha=$(git -C "$RUNNER_TEMP/ntfs" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        git -C "$RUNNER_TEMP/ntfs" log --oneline -1
+    - name: Patches
+      if: inputs.patches != ''
+      shell: bash
+      env:
+        PATCHES: ${{ inputs.patches }}
+      run: |
+        # shellcheck disable=SC2086 # one word per patch
+        vm/apply_patches.sh "$RUNNER_TEMP/ntfs" $PATCHES
+    - name: Compiler cache
+      id: ccache
+      uses: actions/cache/restore@v6
+      with:
+        path: ~/.cache/ccache-kernel
+        key: ccache-kernel-${{ inputs.distro }}-${{ steps.src.outputs.sha }}
+        restore-keys: ccache-kernel-${{ inputs.distro }}-
+    - name: Build the kernel
+      shell: bash
+      env:
+        FLAVOUR: ${{ inputs.flavour }}
+      run: |
+        # build_kernel.sh keeps an existing ccache.conf: compressed and small
+        # enough for the Actions cache
+        mkdir -p ~/.cache/ccache-kernel
+        printf 'max_size = 3G\ncompression = true\nsloppiness = time_macros\n' \
+          > ~/.cache/ccache-kernel/ccache.conf
+        vm/build_kernel.sh "$RUNNER_TEMP/ntfs" "$RUNNER_TEMP/build" "$FLAVOUR"
+    # saved right after the build: actions/cache saves only when the whole
+    # job passes, and a reproducer failure would leave every run cold
+    - name: Save the compiler cache
+      if: inputs.save-cache == 'true' && steps.ccache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: ~/.cache/ccache-kernel
+        key: ${{ steps.ccache.outputs.cache-primary-key }}

@@ -37,22 +37,15 @@ env:
     make -C tests CFLAGS="-O2 -Wall -Werror"
     gcc -static -O2 -Wall -Werror -o "$RUNNER_TEMP/init" vm/init.c
     for f in vm/build_kernel.sh vm/run_vm.sh vm/check_patches.sh vm/kill_vm.sh \
+             vm/apply_patches.sh \
              tests/run_reproducers.sh tests/run_guest_script.sh tests/run_kernel_tests.sh \
              tests/compare_results.py tests/set_init_size.py tests/verify_tree.py; do
       "$f" --help > /dev/null
     done
     missing=$(grep -L "SPDX-License-Identifier: GPL-2.0-or-later" \
               vm/*.sh vm/*.py vm/*.c tests/*.sh tests/*.py tests/*.c tests/Makefile \
-              .github/workflows/*.yml || true)
+              .github/workflows/*.yml .github/actions/*/action.yml || true)
     if [ -n "$missing" ]; then echo "no SPDX line: $missing"; exit 1; fi
-  ARCH_PACKAGES: >-
-    qemu-base gcc make cpio python zstd xz bc bison flex libelf openssl ccache perl kmod
-    pahole ntfs-3g ntfsprogs xfsprogs autoconf automake libtool pkgconf util-linux-libs gnutls
-    libgcrypt git attr
-  UBUNTU_PACKAGES: >-
-    qemu-system-x86 gcc make libc6-dev cpio python3 zstd xz-utils bc bison flex libelf-dev
-    libssl-dev ccache perl kmod dwarves ntfs-3g xfsprogs autoconf automake libtool
-    pkg-config libblkid-dev uuid-dev libgnutls28-dev libgcrypt20-dev git ca-certificates attr
 
 jobs:
   lint:
@@ -124,61 +117,11 @@ jobs:
       options: --device /dev/kvm
     timeout-minutes: 90
     steps:
-      - name: Packages (Arch)
-        if: matrix.distro == 'arch'
-        run: |
-          # shellcheck disable=SC2086 # one word per package
-          pacman -Syu --noconfirm --needed $ARCH_PACKAGES
-      - name: Packages and KVM access (Ubuntu)
-        if: matrix.distro != 'arch'
-        run: |
-          sudo apt-get update
-          # shellcheck disable=SC2086 # one word per package
-          sudo apt-get install -y --no-install-recommends $UBUNTU_PACKAGES
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' |
-            sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
       - uses: actions/checkout@v7
-      - name: KVM
-        run: test -w /dev/kvm && ls -l /dev/kvm
-      - name: ntfsprogs-plus (ntfsck and ntfsinfo; mkntfs comes from ntfs-3g)
-        run: |
-          git clone --depth 1 https://github.com/ntfsprogs-plus/ntfsprogs-plus.git "$RUNNER_TEMP/ntfsprogs-plus"
-          cd "$RUNNER_TEMP/ntfsprogs-plus"
-          ./autogen.sh
-          ./configure --prefix="$RUNNER_TEMP/ntfsprogs-plus-root"
-          make -j"$(nproc)"
-          make install
-      - name: Kernel source
-        id: src
-        run: |
-          git clone --depth 1 --branch ntfs-next \
-            https://git.kernel.org/pub/scm/linux/kernel/git/linkinjeon/ntfs.git "$RUNNER_TEMP/ntfs"
-          echo "sha=$(git -C "$RUNNER_TEMP/ntfs" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      - name: Compiler cache
-        id: ccache
-        uses: actions/cache/restore@v6
+      - uses: ./.github/actions/kernel
         with:
-          path: ~/.cache/ccache-kernel
-          key: ccache-kernel-${{ matrix.distro }}-${{ steps.src.outputs.sha }}
-          restore-keys: ccache-kernel-${{ matrix.distro }}-
-      - name: Build the kernel
-        run: |
-          # build_kernel.sh keeps an existing ccache.conf: compressed and small
-          # enough for the Actions cache
-          mkdir -p ~/.cache/ccache-kernel
-          printf 'max_size = 3G\ncompression = true\nsloppiness = time_macros\n' \
-            > ~/.cache/ccache-kernel/ccache.conf
-          vm/build_kernel.sh "$RUNNER_TEMP/ntfs" "$RUNNER_TEMP/build" debug
-      # saved right after the build: actions/cache saves only when the whole
-      # job passes, and a reproducer failure would leave every run cold
-      - name: Save the compiler cache
-        if: matrix.shard == 1 && steps.ccache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
-        with:
-          path: ~/.cache/ccache-kernel
-          key: ${{ steps.ccache.outputs.cache-primary-key }}
+          distro: ${{ matrix.distro }}
+          save-cache: ${{ matrix.shard == 1 }}
       - name: Reproducers
         env:
           DMESG_IGNORE: slab_common.c:111
