@@ -18,8 +18,8 @@ ntfs-next is expected to give, and CI flags any test whose result changes.
 - What a kernel build needs (bc, bison, flex, libelf, openssl headers);
   ccache is used when installed.
 - ntfs-3g for `mkntfs` and the FUSE driver (several tests cross-check with
-  it; Arch Linux ships `mkntfs` in its own `ntfsprogs` package), and
-  xfsprogs for `xfs_io`.
+  it; Arch Linux ships `mkntfs` in its own `ntfsprogs` package), xfsprogs
+  for `xfs_io` and attr for `setfattr`.
 - ntfsprogs-plus (<https://github.com/ntfsprogs-plus/ntfsprogs-plus>) for
   `ntfsck` and `ntfsinfo`, in `PATH` or named by `NTFSCK` and `NTFSINFO`.
   The expected results were made with ntfs-3g's mkntfs; install
@@ -33,7 +33,7 @@ Debian or Ubuntu (Ubuntu 26.04 is tested in CI):
 sudo apt install qemu-system-x86 gcc make libc6-dev cpio python3 zstd xz-utils \
     bc bison flex libelf-dev libssl-dev ccache perl kmod dwarves ntfs-3g xfsprogs \
     autoconf automake libtool pkg-config libblkid-dev uuid-dev libgnutls28-dev \
-    libgcrypt20-dev git
+    libgcrypt20-dev git attr
 ```
 
 Arch Linux (tested in CI):
@@ -41,7 +41,7 @@ Arch Linux (tested in CI):
 ```bash
 sudo pacman -S --needed qemu-base gcc make cpio python zstd xz bc bison flex libelf \
     openssl ccache perl kmod pahole ntfs-3g ntfsprogs xfsprogs autoconf automake libtool pkgconf \
-    util-linux-libs gnutls libgcrypt git
+    util-linux-libs gnutls libgcrypt git attr
 ```
 
 ntfsprogs-plus from source:

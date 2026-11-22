@@ -61,7 +61,8 @@ PY
 mount_drv ntfs-3g $img rw || { fail "ntfs-3g mount"; exit; }
 chunk=$((2 * cs)); [ $chunk -lt 1024 ] && chunk=1024
 python3 $HARNESS/make_fragmented.py $M $chunk
-mkdir $M/comp && setfattr -h -v 0x00000810 -n system.ntfs_attrib_be $M/comp
+mkdir $M/comp && setfattr -h -v 0x00000810 -n system.ntfs_attrib_be $M/comp ||
+	{ fail "set compressed directory"; exit; }
 text $M/comp/t1-ntfs3g.txt 3000000 1
 text $M/comp/t6-ntfs3g-then-ntfs.txt 300000 6
 umount $M

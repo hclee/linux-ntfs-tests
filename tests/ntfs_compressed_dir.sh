@@ -13,7 +13,8 @@ cs=${DIR_CLUSTER:-4096}
 img=$W/cdir-$cs.img; rm -f $img $W/cdir-exp.json; truncate -s 64M $img
 mkntfs -F -Q -q -c $cs $img >/dev/null 2>&1 || { fail "mkntfs"; exit; }
 mount_drv ntfs-3g $img rw || { fail "ntfs-3g mount"; exit; }
-mkdir $M/comp && setfattr -h -v 0x00000810 -n system.ntfs_attrib_be $M/comp
+mkdir $M/comp && setfattr -h -v 0x00000810 -n system.ntfs_attrib_be $M/comp ||
+	{ fail "set compressed directory"; exit; }
 # 8 KiB, so that ntfs-3g stores it non-resident: ntfsck reports the
 # resident compressed $DATA that ntfs-3g writes for tiny files
 python3 -c "open('$M/comp/old.txt', 'wb').write(b'made by ntfs-3g ' * 512)"
