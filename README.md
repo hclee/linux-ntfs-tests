@@ -18,7 +18,8 @@ ntfs-next is expected to give, and CI flags any test whose result changes.
 - What a kernel build needs (bc, bison, flex, libelf, openssl headers);
   ccache is used when installed.
 - ntfs-3g for `mkntfs` and the FUSE driver (several tests cross-check with
-  it), and xfsprogs for `xfs_io`.
+  it; Arch Linux ships `mkntfs` in its own `ntfsprogs` package), and
+  xfsprogs for `xfs_io`.
 - ntfsprogs-plus (<https://github.com/ntfsprogs-plus/ntfsprogs-plus>) for
   `ntfsck` and `ntfsinfo`, in `PATH` or named by `NTFSCK` and `NTFSINFO`.
   The expected results were made with ntfs-3g's mkntfs; install
@@ -39,7 +40,7 @@ Arch Linux (tested in CI):
 
 ```bash
 sudo pacman -S --needed qemu-base gcc make cpio python zstd xz bc bison flex libelf \
-    openssl ccache perl kmod pahole ntfs-3g xfsprogs autoconf automake libtool pkgconf \
+    openssl ccache perl kmod pahole ntfs-3g ntfsprogs xfsprogs autoconf automake libtool pkgconf \
     util-linux-libs gnutls libgcrypt git
 ```
 
@@ -76,7 +77,8 @@ tests/run_reproducers.sh ../build-ntfs /var/tmp/repro short_write_size.sh
 
 Each test leaves `WORKDIR/<test>/shell.log` (the guest script under `bash
 -x`) and `console.log` (the kernel log). `CLUSTERS="512 4096"` limits the
-cluster sizes; `MEM`, `SMP` and `TIMEOUT` size the VM. Every script prints
+cluster sizes; `MEM`, `SMP` and `TIMEOUT` size the VM; `JOBS=4` runs four
+VMs at once. Every script prints
 its usage with `--help`.
 
 ## Layout

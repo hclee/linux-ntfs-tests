@@ -42,7 +42,7 @@ env:
     if [ -n "$missing" ]; then echo "no SPDX line: $missing"; exit 1; fi
   ARCH_PACKAGES: >-
     qemu-base gcc make cpio python zstd xz bc bison flex libelf openssl ccache perl kmod
-    pahole ntfs-3g xfsprogs autoconf automake libtool pkgconf util-linux-libs gnutls
+    pahole ntfs-3g ntfsprogs xfsprogs autoconf automake libtool pkgconf util-linux-libs gnutls
     libgcrypt git
   UBUNTU_PACKAGES: >-
     qemu-system-x86 gcc make libc6-dev cpio python3 zstd xz-utils bc bison flex libelf-dev
