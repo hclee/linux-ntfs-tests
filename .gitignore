@@ -3,3 +3,5 @@ tests/killed_short_write
 tests/killed_write_mmap
 __pycache__/
 *.pyc
+repro-out/
+repro-out.txt

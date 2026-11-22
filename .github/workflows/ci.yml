@@ -163,18 +163,20 @@ jobs:
         run: |
           export NTFSCK="$RUNNER_TEMP/ntfsprogs-plus-root/sbin/ntfsck"
           export NTFSINFO="$RUNNER_TEMP/ntfsprogs-plus-root/bin/ntfsinfo"
-          tests/run_reproducers.sh "$RUNNER_TEMP/build" "$RUNNER_TEMP/repro" |
-            tee "$RUNNER_TEMP/repro.txt" || true
-          tests/compare_results.py tests/expected/ntfs-next.txt "$RUNNER_TEMP/repro.txt"
+          # in the workspace: upload-artifact does not find runner.temp paths
+          # inside a container job
+          tests/run_reproducers.sh "$RUNNER_TEMP/build" repro-out |
+            tee repro-out.txt || true
+          tests/compare_results.py tests/expected/ntfs-next.txt repro-out.txt
       - name: Logs
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: reproducer-logs-${{ matrix.distro }}
           path: |
-            ${{ runner.temp }}/repro.txt
-            ${{ runner.temp }}/repro/*.log
-            ${{ runner.temp }}/repro/*/run.out
-            ${{ runner.temp }}/repro/*/shell.log
-            ${{ runner.temp }}/repro/*/console.log
+            repro-out.txt
+            repro-out/*.log
+            repro-out/*/shell.log
+            repro-out/*/console.log
+            repro-out/*/run.out
           if-no-files-found: ignore
