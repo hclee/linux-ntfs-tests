@@ -125,13 +125,12 @@ online defragmentation series (`NTFS_IOC_MOVE_CLUSTERS`, `FS_IOC_GETFSMAP`);
 ## CI
 
 `.github/workflows/ci.yml` lints on Arch Linux, Fedora, Debian testing and
-Ubuntu 26.04 on every push. The `ntfs-next` job builds ntfs-next as a debug
-kernel and runs every reproducer under KVM on Arch Linux and on Ubuntu
-26.04, failing when a result differs from `tests/expected/ntfs-next.txt`: a
-regression, or a fix that reached ntfs-next (then update the file). It runs
-weekly and on pushes to master once the repository is public (while it is
-private nothing runs by itself), and by hand (workflow_dispatch) at any
-time; a run takes about three hours.
+Ubuntu 26.04 on every push and pull request. The `ntfs-next` job builds
+ntfs-next as a debug kernel and runs every reproducer under KVM on Arch Linux
+and on Ubuntu 26.04, failing when a result differs from
+`tests/expected/ntfs-next.txt`: a regression, or a fix that reached ntfs-next
+(then update the file). It runs on pushes to master, on pull requests, weekly
+and by hand (workflow_dispatch). Each run uploads the test logs as artifacts.
 
 ## Licence
 

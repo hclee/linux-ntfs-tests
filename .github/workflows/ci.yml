@@ -2,14 +2,12 @@
 #
 # lint: syntax, C helpers, --help texts and licence lines on Arch Linux,
 # Fedora, Debian testing (containers) and Ubuntu 26.04 (the runner itself),
-# on every push and pull request. While the repository is private nothing runs
-# by itself; workflow_dispatch starts everything by hand.
+# on every push and pull request.
 # ntfs-next: builds linkinjeon/ntfs.git ntfs-next as a debug kernel, runs
 # every reproducer in QEMU with KVM, on Arch Linux and on Ubuntu 26.04, and
 # fails when a result differs from tests/expected/ntfs-next.txt (a regression,
-# or a fix that landed upstream). Started by hand at any time; weekly and on
-# pushes to master only in a public repository, where standard runners are free
-# (a run takes about three hours).
+# or a fix that landed upstream). Runs on pushes to master, on pull requests,
+# weekly (ntfs-next moves without this repository changing) and by hand.
 name: ci
 
 on:
@@ -18,6 +16,9 @@ on:
   workflow_dispatch:
   schedule:
     - cron: "17 3 * * 1"
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -64,22 +65,20 @@ jobs:
             image: debian:testing
             install: apt-get update && apt-get install -y --no-install-recommends gcc make libc6-dev python3
     name: lint (${{ matrix.distro }})
-    if: github.event_name == 'workflow_dispatch' || !github.event.repository.private
     runs-on: ubuntu-26.04
     container: ${{ matrix.image }}
     steps:
       - name: Packages
         run: ${{ matrix.install }}
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Lint
         run: bash -c "$LINT"
 
   lint-ubuntu:
     name: lint (ubuntu-26.04)
-    if: github.event_name == 'workflow_dispatch' || !github.event.repository.private
     runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Packages
         run: |
           sudo apt-get update
@@ -91,11 +90,7 @@ jobs:
 
   ntfs-next:
     needs: [lint, lint-ubuntu]
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (!github.event.repository.private &&
-       (github.event_name == 'schedule' ||
-        (github.event_name == 'push' && github.ref == 'refs/heads/master')))
+    if: github.event_name != 'push' || github.ref == 'refs/heads/master'
     strategy:
       fail-fast: false
       matrix:
@@ -122,7 +117,7 @@ jobs:
             sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: KVM
         run: test -w /dev/kvm && ls -l /dev/kvm
       - name: ntfsprogs-plus (ntfsck and ntfsinfo; mkntfs comes from ntfs-3g)
@@ -140,13 +135,19 @@ jobs:
             https://git.kernel.org/pub/scm/linux/kernel/git/linkinjeon/ntfs.git "$RUNNER_TEMP/ntfs"
           echo "sha=$(git -C "$RUNNER_TEMP/ntfs" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Compiler cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ccache-kernel
           key: ccache-kernel-${{ matrix.distro }}-${{ steps.src.outputs.sha }}
           restore-keys: ccache-kernel-${{ matrix.distro }}-
       - name: Build the kernel
-        run: vm/build_kernel.sh "$RUNNER_TEMP/ntfs" "$RUNNER_TEMP/build" debug
+        run: |
+          # build_kernel.sh keeps an existing ccache.conf: compressed and small
+          # enough for the Actions cache
+          mkdir -p ~/.cache/ccache-kernel
+          printf 'max_size = 3G\ncompression = true\nsloppiness = time_macros\n' \
+            > ~/.cache/ccache-kernel/ccache.conf
+          vm/build_kernel.sh "$RUNNER_TEMP/ntfs" "$RUNNER_TEMP/build" debug
       - name: Reproducers
         env:
           DMESG_IGNORE: slab_common.c:111
@@ -158,7 +159,7 @@ jobs:
           tests/compare_results.py tests/expected/ntfs-next.txt "$RUNNER_TEMP/repro.txt"
       - name: Logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: reproducer-logs-${{ matrix.distro }}
           path: |
