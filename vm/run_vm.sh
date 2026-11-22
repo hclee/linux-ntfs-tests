@@ -15,6 +15,9 @@
 # host's own tools, so the guest gets the host's CPU model (-cpu host).
 # On QEMU's default qemu64 model, code that uses AVX dies with SIGILL, as
 # the init program does when linked with Ubuntu 26.04's static glibc.
+# The guest boots with mitigations=off. With the host's CPU model it would
+# otherwise turn on speculation mitigations, which cost a lot in a nested VM
+# and do not matter to the tests.
 # MEM (3G), SMP (2), TIMEOUT (1800 s) and APPEND (more of the
 # kernel command line) size the VM. Needs KVM access and gcc with a static
 # libc (for the init program), not root. Output: WORKDIR/console.log.
@@ -50,7 +53,7 @@ done
 # --- boot ---------------------------------------------------------------------
 timeout "${TIMEOUT:-1800}" qemu-system-x86_64 -enable-kvm -cpu host -m "${MEM:-3G}" -smp "${SMP:-2}" -nographic -no-reboot \
 	-kernel "$kernel" -initrd "$work/initramfs.cpio" \
-	-append "console=ttyS0 panic=-1 loglevel=4 ${APPEND:-} ntfsvm.work=$work ntfsvm.script=$script" \
+	-append "console=ttyS0 panic=-1 loglevel=4 mitigations=off ${APPEND:-} ntfsvm.work=$work ntfsvm.script=$script" \
 	-virtfs local,path=/,mount_tag=root,security_model=none,readonly=on,multidevs=remap \
 	-virtfs local,path="$work",mount_tag=work,security_model=none,multidevs=remap \
 	| tee "$work/console.log" | grep -E '^\{|init:|BUG|Oops|ntfs' || true

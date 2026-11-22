@@ -44,9 +44,11 @@ run_ntfsck() {	# run_ntfsck IMG TAG: ntfsck -n, PASS/FAIL line, log in $W/ntfsck
 	if [ $rc = 0 ]; then echo "PASS: ntfsck $2"; else fail "ntfsck $2 rc=$rc"; tail -4 "$W/ntfsck-$2.log"; fi
 }
 dmesg_check() {	# sanitizer / lockdep / warning reports since boot -> FAIL
-	# DMESG_IGNORE: extended regex of known, unrelated report lines to skip
+	# DMESG_IGNORE: extended regex of known, unrelated report lines to skip.
+	# CPU vulnerability notices at boot (they link to admin-guide/hw-vuln)
+	# are not reports.
 	local r
-	r=$(dmesg | grep -E "KASAN|UBSAN|BUG:|WARNING:|possible circular|possible recursive|inconsistent lock|Oops|general protection|shift-out-of-bounds|INFO: task|kmemleak" | grep -v "### ")
+	r=$(dmesg | grep -E "KASAN|UBSAN|BUG:|WARNING:|possible circular|possible recursive|inconsistent lock|Oops|general protection|shift-out-of-bounds|INFO: task|kmemleak" | grep -v "### " | grep -v "admin-guide/hw-vuln")
 	[ -n "${DMESG_IGNORE:-}" ] && r=$(echo "$r" | grep -vE "$DMESG_IGNORE")
 	if [ -n "$r" ]; then fail "dmesg reports"; echo "$r" | head -40; else echo "PASS: dmesg clean"; fi
 	# lockdep switches itself off after its first report (or never ran)
