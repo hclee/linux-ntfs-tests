@@ -1,0 +1,88 @@
+SPDX-License-Identifier: GPL-2.0-or-later (as fs/ntfs/file.c)
+
+Proposed change on top of "[PATCH v8] ntfs: trim the sizes after a short
+write" (https://lore.kernel.org/all/20261120023504.4134966-1-zhanxusheng1024@gmail.com/).
+iomap_write_begin() returns -EINTR at once for a task with a fatal signal
+pending, so v8's zeroing after a short write always fails for a writer
+killed by SIGKILL, and its fallback then drops page cache that a shared
+mapping may have dirtied. Zero from a worker instead when the caller has a
+fatal signal pending. Test: tests/killed_write_mmap.sh.
+
+diff --git a/fs/ntfs/file.c b/fs/ntfs/file.c
+index 25034735d2..a65892bb08 100644
+--- a/fs/ntfs/file.c
++++ b/fs/ntfs/file.c
+@@ -22,6 +22,7 @@
+ #include <linux/overflow.h>
+ #include <linux/security.h>
+ #include <linux/slab.h>
++#include <linux/workqueue.h>
+ #include <uapi/linux/ntfs.h>
+ 
+ #include "lcnalloc.h"
+@@ -871,6 +872,52 @@ static loff_t ntfs_allocated_end_on_disk(struct ntfs_inode *ni)
+ 	return end;
+ }
+ 
++struct ntfs_zero_work {
++	struct work_struct work;
++	struct inode *inode;
++	loff_t pos;
++	loff_t len;
++	int err;
++};
++
++static void ntfs_zero_workfn(struct work_struct *work)
++{
++	struct ntfs_zero_work *zw = container_of(work, struct ntfs_zero_work,
++						 work);
++
++	zw->err = iomap_zero_range(zw->inode, zw->pos, zw->len, NULL,
++				   ntfs_seek_iomap_next, &ntfs_iomap_folio_ops,
++				   NULL);
++}
++
++/*
++ * iomap_zero_range() gives up with -EINTR when the caller has a fatal signal
++ * pending, and a writer killed during its copy is one whose short write must
++ * still be zeroed: zero from a worker then, which has no signal to see.  The
++ * caller holds the invalidate lock, which keeps page faults out meanwhile.
++ */
++static int ntfs_zero_range_unkillable(struct inode *inode, loff_t pos,
++				      loff_t len)
++{
++	struct ntfs_zero_work zw = { .inode = inode, .pos = pos, .len = len };
++	int err;
++
++	if (!fatal_signal_pending(current)) {
++		err = iomap_zero_range(inode, pos, len, NULL,
++				       ntfs_seek_iomap_next,
++				       &ntfs_iomap_folio_ops, NULL);
++		/* the signal may also come while it zeroes */
++		if (err != -EINTR || !fatal_signal_pending(current))
++			return err;
++	}
++
++	INIT_WORK_ONSTACK(&zw.work, ntfs_zero_workfn);
++	queue_work(system_unbound_wq, &zw.work);
++	flush_work(&zw.work);
++	destroy_work_on_stack(&zw.work);
++	return zw.err;
++}
++
+ ssize_t ntfs_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
+ {
+ 	struct file *file = iocb->ki_filp;
+@@ -1000,10 +1047,8 @@ ssize_t ntfs_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
+ 
+ 			zend = min(zend, new_data_size);
+ 			if (zend > zstart) {
+-				err = iomap_zero_range(vi, zstart,
+-						zend - zstart, NULL,
+-						ntfs_seek_iomap_next,
+-						&ntfs_iomap_folio_ops, NULL);
++				err = ntfs_zero_range_unkillable(vi, zstart,
++								 zend - zstart);
+ 				/* A direct read must not see the old blocks. */
+ 				if (!err && iocb->ki_flags & IOCB_DIRECT)
+ 					err = filemap_write_and_wait_range(
