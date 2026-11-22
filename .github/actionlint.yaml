@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# ubuntu-26.04 is a GitHub-hosted runner label newer than actionlint's list.
+self-hosted-runner:
+  labels:
+    - ubuntu-26.04

@@ -1,0 +1,5 @@
+# C helpers built by make -C tests
+tests/killed_short_write
+tests/killed_write_mmap
+__pycache__/
+*.pyc

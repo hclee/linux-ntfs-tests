@@ -1,0 +1,168 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# lint: syntax, C helpers, --help texts and licence lines on Arch Linux,
+# Fedora, Debian testing (containers) and Ubuntu 26.04 (the runner itself),
+# on every push and pull request. While the repository is private nothing runs
+# by itself; workflow_dispatch starts everything by hand.
+# ntfs-next: builds linkinjeon/ntfs.git ntfs-next as a debug kernel, runs
+# every reproducer in QEMU with KVM, on Arch Linux and on Ubuntu 26.04, and
+# fails when a result differs from tests/expected/ntfs-next.txt (a regression,
+# or a fix that landed upstream). Started by hand at any time; weekly and on
+# pushes to master only in a public repository, where standard runners are free
+# (a run takes about three hours).
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * 1"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  LINT: |
+    set -e
+    for f in vm/*.sh tests/*.sh; do bash -n "$f"; done
+    python3 -m py_compile tests/*.py vm/*.py
+    make -C tests CFLAGS="-O2 -Wall -Werror"
+    gcc -static -O2 -Wall -Werror -o "$RUNNER_TEMP/init" vm/init.c
+    for f in vm/build_kernel.sh vm/run_vm.sh vm/check_patches.sh vm/kill_vm.sh \
+             tests/run_reproducers.sh tests/run_guest_script.sh tests/run_kernel_tests.sh \
+             tests/compare_results.py tests/set_init_size.py; do
+      "$f" --help > /dev/null
+    done
+    missing=$(grep -L "SPDX-License-Identifier: GPL-2.0-or-later" \
+              vm/*.sh vm/*.py vm/*.c tests/*.sh tests/*.py tests/*.c tests/Makefile \
+              .github/workflows/*.yml || true)
+    if [ -n "$missing" ]; then echo "no SPDX line: $missing"; exit 1; fi
+  ARCH_PACKAGES: >-
+    qemu-base gcc make cpio python zstd xz bc bison flex libelf openssl ccache perl kmod
+    pahole ntfs-3g xfsprogs autoconf automake libtool pkgconf util-linux-libs gnutls
+    libgcrypt git
+  UBUNTU_PACKAGES: >-
+    qemu-system-x86 gcc make libc6-dev cpio python3 zstd xz-utils bc bison flex libelf-dev
+    libssl-dev ccache perl kmod dwarves ntfs-3g xfsprogs autoconf automake libtool
+    pkg-config libblkid-dev uuid-dev libgnutls28-dev libgcrypt20-dev git ca-certificates
+
+jobs:
+  lint:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: arch
+            image: archlinux:latest
+            install: pacman -Syu --noconfirm --needed gcc make python
+          - distro: fedora
+            image: fedora:latest
+            install: dnf -y install gcc make glibc-static python3
+          - distro: debian-testing
+            image: debian:testing
+            install: apt-get update && apt-get install -y --no-install-recommends gcc make libc6-dev python3
+    name: lint (${{ matrix.distro }})
+    if: github.event_name == 'workflow_dispatch' || !github.event.repository.private
+    runs-on: ubuntu-26.04
+    container: ${{ matrix.image }}
+    steps:
+      - name: Packages
+        run: ${{ matrix.install }}
+      - uses: actions/checkout@v4
+      - name: Lint
+        run: bash -c "$LINT"
+
+  lint-ubuntu:
+    name: lint (ubuntu-26.04)
+    if: github.event_name == 'workflow_dispatch' || !github.event.repository.private
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc make libc6-dev python3
+      - name: Lint
+        run: bash -c "$LINT"
+      - name: Workflow (actionlint)
+        run: docker run --rm -v "$PWD:/repo:ro" -w /repo rhysd/actionlint:latest -color
+
+  ntfs-next:
+    needs: [lint, lint-ubuntu]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (!github.event.repository.private &&
+       (github.event_name == 'schedule' ||
+        (github.event_name == 'push' && github.ref == 'refs/heads/master')))
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [arch, ubuntu-26.04]
+    name: ntfs-next (${{ matrix.distro }})
+    runs-on: ubuntu-26.04
+    container:
+      image: ${{ matrix.distro == 'arch' && 'archlinux:latest' || '' }}
+      options: --device /dev/kvm
+    timeout-minutes: 300
+    steps:
+      - name: Packages (Arch)
+        if: matrix.distro == 'arch'
+        run: |
+          # shellcheck disable=SC2086 # one word per package
+          pacman -Syu --noconfirm --needed $ARCH_PACKAGES
+      - name: Packages and KVM access (Ubuntu)
+        if: matrix.distro != 'arch'
+        run: |
+          sudo apt-get update
+          # shellcheck disable=SC2086 # one word per package
+          sudo apt-get install -y --no-install-recommends $UBUNTU_PACKAGES
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' |
+            sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: actions/checkout@v4
+      - name: KVM
+        run: test -w /dev/kvm && ls -l /dev/kvm
+      - name: ntfsprogs-plus (ntfsck and ntfsinfo; mkntfs comes from ntfs-3g)
+        run: |
+          git clone --depth 1 https://github.com/ntfsprogs-plus/ntfsprogs-plus.git "$RUNNER_TEMP/ntfsprogs-plus"
+          cd "$RUNNER_TEMP/ntfsprogs-plus"
+          ./autogen.sh
+          ./configure --prefix="$RUNNER_TEMP/ntfsprogs-plus-root"
+          make -j"$(nproc)"
+          make install
+      - name: Kernel source
+        id: src
+        run: |
+          git clone --depth 1 --branch ntfs-next \
+            https://git.kernel.org/pub/scm/linux/kernel/git/linkinjeon/ntfs.git "$RUNNER_TEMP/ntfs"
+          echo "sha=$(git -C "$RUNNER_TEMP/ntfs" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache-kernel
+          key: ccache-kernel-${{ matrix.distro }}-${{ steps.src.outputs.sha }}
+          restore-keys: ccache-kernel-${{ matrix.distro }}-
+      - name: Build the kernel
+        run: vm/build_kernel.sh "$RUNNER_TEMP/ntfs" "$RUNNER_TEMP/build" debug
+      - name: Reproducers
+        env:
+          DMESG_IGNORE: slab_common.c:111
+        run: |
+          export NTFSCK="$RUNNER_TEMP/ntfsprogs-plus-root/sbin/ntfsck"
+          export NTFSINFO="$RUNNER_TEMP/ntfsprogs-plus-root/bin/ntfsinfo"
+          tests/run_reproducers.sh "$RUNNER_TEMP/build" "$RUNNER_TEMP/repro" |
+            tee "$RUNNER_TEMP/repro.txt" || true
+          tests/compare_results.py tests/expected/ntfs-next.txt "$RUNNER_TEMP/repro.txt"
+      - name: Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reproducer-logs-${{ matrix.distro }}
+          path: |
+            ${{ runner.temp }}/repro.txt
+            ${{ runner.temp }}/repro/*/shell.log
+            ${{ runner.temp }}/repro/*/console.log
+          if-no-files-found: ignore

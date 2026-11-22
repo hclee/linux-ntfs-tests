@@ -1,0 +1,27 @@
+# Expected results of tests/run_reproducers.sh on linkinjeon/ntfs.git
+# ntfs-next without any fix series, debug kernel from vm/build_kernel.sh,
+# DMESG_IGNORE='slab_common.c:111' (the boot-time duplicate slab name warning
+# that slab_cache_names checks on its own). Checked at ntfs-next 552aafd4390c.
+# Format: test name, then pass or fail.
+delalloc_accounting fail
+delalloc_alloc_failure fail
+delalloc_failed_write fail
+delalloc_partial_fail pass
+delalloc_st_blocks fail
+delalloc_zero_race fail
+fsx_parallel pass
+hole_fill_stale fail
+keep_size_short_write fail
+killed_short_write pass
+killed_write_mmap fail
+ntfs_compressed_dir fail
+ntfs_compressed_frag_write fail
+ntfs_compressed_stages fail
+ntfs_compressed_write_errors fail
+short_copy_stale fail
+short_write_size fail
+slab_cache_names fail
+sparse_cu_crafted fail
+sparse_cu_read pass
+sparse_cu_rw pass
+stale_wb_race fail
