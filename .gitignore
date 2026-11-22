@@ -4,4 +4,4 @@ tests/killed_write_mmap
 __pycache__/
 *.pyc
 repro-out/
-repro-out.txt
+results-*.txt

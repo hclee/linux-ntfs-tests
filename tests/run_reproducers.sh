@@ -13,6 +13,7 @@
 # console.log). The C helpers are built first (make -C tests).
 # Environment: CLUSTERS, MEM, SMP and TIMEOUT pass through to the VM. JOBS
 # (default 1) runs that many VMs at once; each takes MEM and SMP vCPUs.
+# SKIP leaves out the scripts it names (e.g. SKIP="fsx_parallel.sh").
 # Exit status 1 if any script reported a FAIL or did not finish.
 #
 # Example:
@@ -30,6 +31,13 @@ if [ $# = 0 ]; then
 		short_write_size.sh stale_wb_race.sh slab_cache_names.sh sparse_cu_*.sh \
 		ntfs_compressed_*.sh fsx_parallel.sh killed_short_write.sh killed_write_mmap.sh \
 		keep_size_short_write.sh 2>/dev/null | grep -vxF "$(printf '%s\n' $slow)")
+fi
+if [ -n "${SKIP:-}" ]; then
+	keep=()
+	for s in "$@"; do
+		case " $(echo $SKIP) " in *" ${s##*/} "*) ;; *) keep+=("$s");; esac
+	done
+	set -- "${keep[@]}"
 fi
 mkdir -p "$work"
 make -s -C "$here" || exit 2	# the C helpers
