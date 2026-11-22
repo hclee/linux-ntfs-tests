@@ -22,10 +22,14 @@ case "${1:-}" in -h|--help|"") sed -n '3,/^set -uo/p' "$0" | sed '$d; s/^# \{0,1
 here=$(cd "$(dirname "$0")" && pwd)
 build=$1; work=$(realpath -m "$2"); shift 2
 if [ $# = 0 ]; then
-	set -- $(cd "$here" && ls delalloc_*.sh hole_fill_stale.sh short_copy_stale.sh \
+	# the slowest first (minutes each), so that with JOBS > 1 the VMs
+	# finish at about the same time
+	slow="ntfs_compressed_stages.sh sparse_cu_crafted.sh hole_fill_stale.sh
+		sparse_cu_rw.sh stale_wb_race.sh"
+	set -- $slow $(cd "$here" && ls delalloc_*.sh hole_fill_stale.sh short_copy_stale.sh \
 		short_write_size.sh stale_wb_race.sh slab_cache_names.sh sparse_cu_*.sh \
 		ntfs_compressed_*.sh fsx_parallel.sh killed_short_write.sh killed_write_mmap.sh \
-		keep_size_short_write.sh 2>/dev/null)
+		keep_size_short_write.sh 2>/dev/null | grep -vxF "$(printf '%s\n' $slow)")
 fi
 mkdir -p "$work"
 make -s -C "$here" || exit 2	# the C helpers

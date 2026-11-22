@@ -43,11 +43,11 @@ env:
   ARCH_PACKAGES: >-
     qemu-base gcc make cpio python zstd xz bc bison flex libelf openssl ccache perl kmod
     pahole ntfs-3g ntfsprogs xfsprogs autoconf automake libtool pkgconf util-linux-libs gnutls
-    libgcrypt git
+    libgcrypt git attr
   UBUNTU_PACKAGES: >-
     qemu-system-x86 gcc make libc6-dev cpio python3 zstd xz-utils bc bison flex libelf-dev
     libssl-dev ccache perl kmod dwarves ntfs-3g xfsprogs autoconf automake libtool
-    pkg-config libblkid-dev uuid-dev libgnutls28-dev libgcrypt20-dev git ca-certificates
+    pkg-config libblkid-dev uuid-dev libgnutls28-dev libgcrypt20-dev git ca-certificates attr
 
 jobs:
   lint:
@@ -160,6 +160,7 @@ jobs:
       - name: Reproducers
         env:
           DMESG_IGNORE: slab_common.c:111
+          JOBS: 2  # the runner has 4 vCPUs and 16 GB; each VM takes 2 and 3 GB
         run: |
           export NTFSCK="$RUNNER_TEMP/ntfsprogs-plus-root/sbin/ntfsck"
           export NTFSINFO="$RUNNER_TEMP/ntfsprogs-plus-root/bin/ntfsinfo"
