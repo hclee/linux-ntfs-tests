@@ -32,7 +32,7 @@ env:
     gcc -static -O2 -Wall -Werror -o "$RUNNER_TEMP/init" vm/init.c
     for f in vm/build_kernel.sh vm/run_vm.sh vm/check_patches.sh vm/kill_vm.sh \
              tests/run_reproducers.sh tests/run_guest_script.sh tests/run_kernel_tests.sh \
-             tests/compare_results.py tests/set_init_size.py; do
+             tests/compare_results.py tests/set_init_size.py tests/verify_tree.py; do
       "$f" --help > /dev/null
     done
     missing=$(grep -L "SPDX-License-Identifier: GPL-2.0-or-later" \
