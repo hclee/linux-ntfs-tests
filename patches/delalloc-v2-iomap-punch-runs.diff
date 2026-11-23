@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Delalloc series v2, on top of v1 (patches 1-7): iomap passes each run of
+# clean blocks of a dirty folio to ->punch() in one call, so that ntfs can
+# release a whole clean cluster with 1 KiB and 2 KiB clusters.
+
+diff --git a/fs/iomap/buffered-io.c b/fs/iomap/buffered-io.c
+index 6d843b168d..2eb8070e34 100644
+--- a/fs/iomap/buffered-io.c
++++ b/fs/iomap/buffered-io.c
+@@ -1364,6 +1364,9 @@ static void iomap_write_delalloc_ifs_punch(struct inode *inode,
+ 	 * blocks within a folio which are marked uptodate
+ 	 * but not dirty. In that case it is necessary to punch
+ 	 * out such blocks to avoid leaking any delalloc blocks.
++	 * Pass each run of clean blocks in one call: a file system
++	 * that reserves space in units larger than a block can only
++	 * release a unit that it sees whole.
+ 	 */
+ 	ifs = folio->private;
+ 	if (!ifs)
+@@ -1374,9 +1377,12 @@ static void iomap_write_delalloc_ifs_punch(struct inode *inode,
+ 	last_blk = offset_in_folio(folio, last_byte) >> blkbits;
+ 	while ((first_blk = ifs_next_clean_block(folio, first_blk, last_blk))
+ 		       <= last_blk) {
++		unsigned int next_blk = ifs_next_dirty_block(folio,
++				first_blk + 1, last_blk);
++
+ 		punch(inode, folio_pos(folio) + (first_blk << blkbits),
+-				1 << blkbits, iomap);
+-		first_blk++;
++				(loff_t)(next_blk - first_blk) << blkbits, iomap);
++		first_blk = next_blk;
+ 	}
+ }
+ 
