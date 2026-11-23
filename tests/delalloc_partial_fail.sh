@@ -9,10 +9,16 @@
 # writeback allocates them: a sparse file gets up to two clusters of zeroes
 # where it had holes.  Writeback also converts a whole delalloc run when it
 # writes back part of it (sync_file_range() of the first page here).
-# Checked for each of $CLUSTERS:
+# iomap releases the clean blocks of a dirty folio one block (512 bytes) at
+# a time, and a delalloc reservation is a whole cluster, so with 1 KiB and
+# 2 KiB clusters the clusters of the first folio that the write did not
+# reach stay reserved unless they are released as one range. The volume
+# first holds a deleted file of 0xee, so that a cluster allocated without
+# being written shows old data. Checked for each of $CLUSTERS plus 1024 and
+# 2048:
 #   - the file reads back as zeroes (or the data written), from the page
 #     cache, after dropping it, and after a remount (correctness, FAIL)
-#   - how many clusters stayed allocated (space, reported only)
+#   - at most the two zeroed edge clusters stay allocated (FAIL)
 #   - ntfsck -n is clean.
 . "$HARNESS/guest_lib.sh"
 mountpoint -q /mnt || mount -t tmpfs -o size=1g tmpfs /mnt
@@ -40,10 +46,12 @@ if bytes(exp) != d:
     sys.exit("differs at %d (size %d)" % (i, len(d)))
 PY
 }
-for cs in $CLUSTERS; do
+for cs in $(printf '%s\n' $CLUSTERS 1024 2048 | sort -nu); do
 	rm -f $IMG; truncate -s 64M $IMG
 	mkntfs -F -Q -q -c $cs $IMG >/dev/null 2>&1 || { fail "mkntfs c$cs"; continue; }
 	mount -i -t ntfs -o loop $IMG $M || { fail "mount c$cs"; continue; }
+	python3 -c "import sys; sys.stdout.buffer.write(b'\xee' * (16 << 20))" > $M/old
+	sync; rm $M/old; sync
 	unit=$((cs > 4096 ? cs : 4096))
 	size=$((64 * unit))
 	for init in 0 full; do
@@ -61,6 +69,9 @@ for cs in $CLUSTERS; do
 		echo 3 > /proc/sys/vm/drop_caches
 		zeroes $f $size $exp && echo "PASS: $tag contents (disk)" || fail "$tag contents (disk)"
 		echo "$tag: $((free0 - free1)) clusters allocated by the failed write"
+		[ $((free0 - free1)) -le 2 ] &&
+			echo "PASS: $tag allocates at most the zeroed edge clusters" ||
+			fail "$tag: $((free0 - free1)) clusters allocated, at most 2 expected"
 	done
 	tag="partial writeback c$cs"; mark "$tag"
 	f=$M/run

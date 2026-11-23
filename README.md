@@ -104,7 +104,7 @@ its usage with `--help`.
 | delalloc_accounting | free space reported by statfs() while delayed allocations are pending, after truncate, unlink and remount |
 | delalloc_alloc_failure | a cluster allocation that fails with ENOMEM keeps other files' delalloc reservations |
 | delalloc_failed_write | a failed buffered write into a hole releases its reservation |
-| delalloc_partial_fail | what a failed unaligned write into a hole leaves allocated |
+| delalloc_partial_fail | a failed unaligned write into a hole leaves at most its two zeroed edge clusters allocated, also with 1 KiB and 2 KiB clusters, and no old data |
 | delalloc_st_blocks | st_blocks with delayed allocation matches what it is after writeback and remount |
 | delalloc_zero_race | writes into holes racing with FIEMAP_FLAG_SYNC writeback never expose old disk contents |
 | hole_fill_stale | direct I/O writes and write faults into holes never expose old disk contents |
