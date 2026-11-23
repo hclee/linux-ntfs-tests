@@ -113,6 +113,7 @@ its usage with `--help`.
 | keep_size_short_write | a short write keeps space preallocated with FALLOC_FL_KEEP_SIZE |
 | killed_short_write | a writer killed by SIGKILL during its copy (userfaultfd) leaves zeroes, not old data |
 | killed_write_mmap | a killed writer on a file with data past its initialized size, with a shared mapping made meanwhile: neither old data nor the mapped page's data lost |
+| stale_write_mapping | a buffered write whose delalloc mapping was allocated and its page reclaimed while its copy was blocked keeps a byte stored meanwhile through a shared mapping |
 | stale_wb_race | writeback does not write through a mapping cached before collapse/insert range, punch hole or truncate |
 | writeback_fragmented_cost | fsync time of a dirty file, contiguous versus 4000 extents (measurement, not pass/fail; not run by default) |
 | ntfs_compressed_* | compressed files and directories: fragmented free space, directory operations, stage-by-stage cross-checks with ntfs-3g and ntfs3, reservations and error paths |
