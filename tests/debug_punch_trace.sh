@@ -13,6 +13,14 @@ probe() { echo "$1" >> $T/kprobe_events && echo "probe ok: $1" || echo "probe FA
 probe 'p:ntpunch ntfs_write_delalloc_punch off=%si:s64 len=%dx:s64'
 probe 'p:ntpunchrl ntfs_attr_punch_delalloc vcn=%si:s64 cnt=%dx:s64'
 probe 'p:ntrelease iomap_write_delalloc_release start=%si:s64 end=%dx:s64'
+probe 'p:scan iomap_write_delalloc_scan start=%dx:s64 end=%cx:s64'
+probe 'p:dpunch iomap_write_delalloc_punch start=%cx:s64 end=%r8:s64'
+probe 'p:ifspunch iomap_write_delalloc_ifs_punch start=%dx:s64 end=%cx:s64'
+probe 'p:seek mapping_seek_hole_data start=%si:s64 end=%dx:s64 whence=%cx:s32'
+probe 'r:seekret mapping_seek_hole_data ret=$retval:s64'
+probe 'p:tail ntfs_dirty_cluster_tail start=%si:s64 end=%dx:s64'
+probe 'p:wbpages ntfs_writepages'
+probe 'p:zero ntfs_zero_range_unkillable pos=%si:s64 len=%dx:s64'
 echo 1 > $T/events/kprobes/enable 2>/dev/null
 shortcopy() {
 	python3 - "$@" <<'PY'
@@ -32,6 +40,8 @@ src = buf + pg - 512
 ctypes.memset(src, 0xab, 512)
 off, n = int(sys.argv[2]), int(sys.argv[3])
 fd = os.open(sys.argv[1], os.O_RDWR)
+if len(sys.argv) > 5:	# fault on the first byte
+    src = buf + pg
 if sys.argv[4] == "read":
     os.pread(fd, n, off)
 r = libc.pwrite(fd, src, n, off)
@@ -40,7 +50,7 @@ PY
 }
 IMG=/mnt/trace.img
 for cs in 1024 2048; do
-	for pre in read noread; do
+	for pre in read noread efault; do
 		rm -f $IMG; truncate -s 64M $IMG
 		mkntfs -F -Q -q -c $cs $IMG >/dev/null 2>&1
 		mount -i -t ntfs -o loop $IMG $M || { fail "mount"; continue; }
@@ -49,7 +59,11 @@ for cs in 1024 2048; do
 		free0=$(stat -f -c %f $M)
 		echo > $T/trace
 		echo "### c$cs $pre"
-		shortcopy $f 0 32768 $pre
+		if [ $pre = efault ]; then
+			shortcopy $f $((8 * 4096 + 512)) 32768 noread efault
+		else
+			shortcopy $f 0 32768 $pre
+		fi
 		echo "free after write: $((free0 - $(stat -f -c %f $M))) clusters used"
 		grep -v '^#' $T/trace | sed 's/^.*: //'
 		xfs_io -c "fiemap -v" $f | sed -n '2,8p'
