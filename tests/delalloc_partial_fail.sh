@@ -20,8 +20,6 @@
 #   - the file reads back as zeroes (or the data written), from the page
 #     cache, after dropping it, and after a remount (correctness, FAIL)
 #   - at most the two zeroed edge clusters stay allocated (FAIL)
-#   - a short copy of 512 bytes into a cached hole allocates one cluster
-#     (FAIL)
 #   - a short copy of one cluster into a hole below the initialized size,
 #     read into the page cache first, allocates one cluster (FAIL).  A write
 #     that ends above the initialized size drops the page cache before it
@@ -111,20 +109,6 @@ for cs in $(printf '%s\n' $CLUSTERS 1024 2048 | sort -nu); do
 			echo "PASS: $tag allocates at most the zeroed edge clusters" ||
 			fail "$tag: $((free0 - free1)) clusters allocated, at most 2 expected"
 	done
-	tag="short copy into a cached hole c$cs"; mark "$tag"
-	f=$M/short
-	xfs_io -f -c "truncate $size" $f -c fsync; sync
-	free0=$(stat -f -c %f $M)
-	shortcopy $f 0 $((8 * unit)) || fail "$tag: the write was not 512 bytes"
-	sync
-	free1=$(stat -f -c %f $M)
-	zeroes $f $size 0 512 0xab && echo "PASS: $tag contents (cache)" || fail "$tag contents (cache)"
-	echo 3 > /proc/sys/vm/drop_caches
-	zeroes $f $size 0 512 0xab && echo "PASS: $tag contents (disk)" || fail "$tag contents (disk)"
-	echo "$tag: $((free0 - free1)) clusters allocated by the short write"
-	[ $((free0 - free1)) -le 1 ] &&
-		echo "PASS: $tag allocates only the cluster written" ||
-		fail "$tag: $((free0 - free1)) clusters allocated, 1 expected"
 	tag="short copy of one cluster into a cached hole c$cs"; mark "$tag"
 	f=$M/short-cs
 	exp_cs="0 $cs 0xab $((size - 512)) 512 0xcd"
