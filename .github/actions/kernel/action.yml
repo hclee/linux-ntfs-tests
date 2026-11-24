@@ -45,7 +45,7 @@ runs:
         pacman -Syu --noconfirm --needed qemu-base gcc make cpio python zstd xz bc bison \
           flex libelf openssl ccache perl kmod pahole ntfs-3g ntfsprogs xfsprogs autoconf \
           automake libtool pkgconf util-linux-libs gnutls libgcrypt git attr acl b4 \
-          libaio liburing libcap gawk psmisc
+          libaio liburing libcap gawk psmisc inetutils
     - name: Packages and KVM access (Ubuntu)
       if: inputs.distro != 'arch'
       shell: bash
