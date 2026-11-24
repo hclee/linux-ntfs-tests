@@ -93,8 +93,10 @@ def reader(cur, stop, bad):
             continue
         os.posix_fadvise(fd, off, ln, os.POSIX_FADV_DONTNEED)
         if n & 1:
-            m = mmap.mmap(fd, ln, mmap.MAP_SHARED, mmap.PROT_READ, offset=off)
-            d = m[:]
+            # mmap() needs a page aligned offset; 512 byte clusters are not
+            a = off & ~(mmap.PAGESIZE - 1)
+            m = mmap.mmap(fd, ln + off - a, mmap.MAP_SHARED, mmap.PROT_READ, offset=a)
+            d = m[off - a:]
             m.close()
         else:
             d = b""
