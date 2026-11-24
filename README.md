@@ -25,7 +25,9 @@ ntfs-next is expected to give, and CI flags any test whose result changes.
   The expected results were made with ntfs-3g's mkntfs; install
   ntfsprogs-plus under its own prefix if its mkntfs should not take over.
 - Optional: an xfstests checkout with fsx built (`XFSTESTS=/path/to/xfstests`)
-  for `fsx_parallel`, and with `src/log-writes/replay-log` for the crash suite.
+  for `fsx_parallel` (`make configure && ./configure && make -C lib &&
+  make -C ltp fsx` builds only fsx, as CI does), and with
+  `src/log-writes/replay-log` for the crash suite.
 
 Debian or Ubuntu (Ubuntu 26.04 is tested in CI):
 
@@ -33,7 +35,7 @@ Debian or Ubuntu (Ubuntu 26.04 is tested in CI):
 sudo apt install qemu-system-x86 gcc make libc6-dev cpio python3 zstd xz-utils \
     bc bison flex libelf-dev libssl-dev ccache perl kmod dwarves ntfs-3g xfsprogs \
     autoconf automake libtool pkg-config libblkid-dev uuid-dev libgnutls28-dev \
-    libgcrypt20-dev git attr
+    libgcrypt20-dev git attr xfslibs-dev libacl1-dev
 ```
 
 Arch Linux (tested in CI):
@@ -41,7 +43,7 @@ Arch Linux (tested in CI):
 ```bash
 sudo pacman -S --needed qemu-base gcc make cpio python zstd xz bc bison flex libelf \
     openssl ccache perl kmod pahole ntfs-3g ntfsprogs xfsprogs autoconf automake libtool pkgconf \
-    util-linux-libs gnutls libgcrypt git attr
+    util-linux-libs gnutls libgcrypt git attr acl
 ```
 
 ntfsprogs-plus from source:
@@ -120,7 +122,7 @@ its usage with `--help`.
 | ntfs_compressed_* | compressed files and directories: fragmented free space, directory operations, stage-by-stage cross-checks with ntfs-3g and ntfs3, reservations and error paths |
 | sparse_cu_* | sparse files with unusual compression unit values, including crafted images |
 | slab_cache_names | slab cache names stay unique with both NTFS drivers loaded |
-| fsx_parallel | xfstests' fsx, several instances in parallel |
+| fsx_parallel | xfstests' fsx, 4 instances of 40000 operations in parallel on each cluster size, then ntfsck |
 | ntfs3_extent_records, ntfs3_readdir_large | fs/ntfs3: attribute lists and extents, large directories (need fs/ntfs3 built as configured by build_kernel.sh) |
 
 The suites run by `tests/run_kernel_tests.sh` need a kernel with the fs/ntfs

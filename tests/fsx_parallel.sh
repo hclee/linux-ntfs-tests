@@ -30,10 +30,14 @@ for cs in $CLUSTERS; do
 	done
 	for p in $pids; do wait $p || { bad=1; fail "fsx c$cs (pid $p), see $W/fsx-c$cs-*.out"; }; done
 	grep -l "^LOG DUMP\|FAIL\|failed" $W/fsx-c$cs-*.out 2>/dev/null | head -3
+	# each instance ends with "All N operations completed A-OK!"
+	grep -h "operations completed A-OK" $W/fsx-c$cs-*.out
+	ok=$(cat $W/fsx-c$cs-*.out | grep -c "operations completed A-OK")
+	[ "$ok" = "$FSX_JOBS" ] || { bad=1; fail "fsx c$cs: $ok of $FSX_JOBS instances completed"; }
 	echo "free after fsx: $(stat -f -c %f $M)"
 	umount $M
 	run_ntfsck $IMG "fsx-c$cs"
-	[ $bad = 0 ] && echo "PASS: fsx x$FSX_JOBS c$cs"
+	[ $bad = 0 ] && echo "PASS: fsx x$FSX_JOBS c$cs, $FSX_OPS operations each"
 done
 rm -f $IMG
 dmesg_check
