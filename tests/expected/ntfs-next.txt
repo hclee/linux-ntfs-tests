@@ -2,11 +2,14 @@
 # ntfs-next without any fix series, debug kernel from vm/build_kernel.sh,
 # DMESG_IGNORE='slab_common.c:111' (the boot-time duplicate slab name warning
 # that slab_cache_names checks on its own). Checked at ntfs-next 552aafd4390c.
+# aio_dio_partial, delalloc_partial_fail and stale_write_mapping were
+# checked at f674e4b6c315.
 # Format: test name, then pass or fail.
+aio_dio_partial fail
 delalloc_accounting fail
 delalloc_alloc_failure fail
 delalloc_failed_write fail
-delalloc_partial_fail pass
+delalloc_partial_fail fail
 delalloc_st_blocks fail
 delalloc_zero_race fail
 fsx_parallel pass
@@ -25,3 +28,4 @@ sparse_cu_crafted fail
 sparse_cu_read pass
 sparse_cu_rw pass
 stale_wb_race fail
+stale_write_mapping fail
