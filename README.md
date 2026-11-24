@@ -24,10 +24,11 @@ ntfs-next is expected to give, and CI flags any test whose result changes.
   `ntfsck` and `ntfsinfo`, in `PATH` or named by `NTFSCK` and `NTFSINFO`.
   The expected results were made with ntfs-3g's mkntfs; install
   ntfsprogs-plus under its own prefix if its mkntfs should not take over.
-- Optional: an xfstests checkout with fsx built (`XFSTESTS=/path/to/xfstests`)
-  for `fsx_parallel` (`make configure && ./configure && make -C lib &&
-  make -C ltp fsx` builds only fsx, as CI does), and with
-  `src/log-writes/replay-log` for the crash suite.
+- An xfstests checkout with fsx built (`XFSTESTS=/path/to/xfstests`) for
+  `fsx_parallel`, which fails without it (leave it out with
+  `SKIP=fsx_parallel.sh`); `make configure && ./configure && make -C lib &&
+  make -C ltp fsx` builds only fsx, as CI does. The crash suite also needs
+  `src/log-writes/replay-log` from a full xfstests build.
 
 Debian or Ubuntu (Ubuntu 26.04 is tested in CI):
 

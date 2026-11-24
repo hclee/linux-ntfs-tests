@@ -5,11 +5,13 @@
 # Environment: FSX (default: $XFSTESTS/ltp/fsx, or fsx in PATH),
 # FSX_JOBS (parallel instances, default 4), FSX_OPS (operations each, default
 # 40000), FSX_ARGS (extra fsx options, default "-l 1048576 -o 65536").
+# Without fsx the script FAILs rather than skip: a skipped run looked like a
+# pass in the results. Leave it out with SKIP="fsx_parallel.sh" instead.
 . "$HARNESS/guest_lib.sh"
 FSX=${FSX:-${XFSTESTS:+$XFSTESTS/ltp/fsx}}
 FSX=${FSX:-$(command -v fsx || echo fsx)}
 if ! [ -x "$FSX" ]; then
-	echo "SKIP: no fsx (build xfstests and set XFSTESTS, or set FSX)"
+	fail "no fsx at '$FSX' (build xfstests and set XFSTESTS, or set FSX)"
 	echo "### done"
 	exit 0
 fi
