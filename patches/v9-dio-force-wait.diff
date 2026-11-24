@@ -1,0 +1,48 @@
+SPDX-License-Identifier: GPL-2.0-or-later (as fs/ntfs/file.c)
+
+Proposed change on top of "[PATCH v9] ntfs: trim the sizes after a short
+write" (https://lore.kernel.org/all/20261124025932.2360848-1-zhanxusheng1024@gmail.com/),
+as Baolin Liu suggested in his review of v9. An asynchronous O_DIRECT write
+that fails after submitting some bios returns -EIOCBQUEUED, so the size
+rollback of ntfs_file_write_iter() does not run, and the sizes moved to
+the end of the write before the I/O leave the clusters it did not reach
+readable. Wait for direct writes that move the initialized size, as ext4
+and XFS do for extending writes. Test: tests/aio_dio_partial.sh.
+
+diff --git a/fs/ntfs/file.c b/fs/ntfs/file.c
+index f3bdc54595..9ee9b62006 100644
+--- a/fs/ntfs/file.c
++++ b/fs/ntfs/file.c
+@@ -762,12 +762,13 @@ static const struct iomap_dio_ops ntfs_write_dio_ops = {
+ 	.end_io			= ntfs_file_write_dio_end_io,
+ };
+ 
+-static ssize_t ntfs_dio_write_iter(struct kiocb *iocb, struct iov_iter *from)
++static ssize_t ntfs_dio_write_iter(struct kiocb *iocb, struct iov_iter *from,
++				   unsigned int dio_flags)
+ {
+ 	ssize_t ret;
+ 
+ 	ret = iomap_dio_rw(iocb, from, ntfs_dio_iomap_next,
+-			&ntfs_write_dio_ops, 0, NULL, 0);
++			&ntfs_write_dio_ops, dio_flags, NULL, 0);
+ 	if (ret == -ENOTBLK)
+ 		ret = 0;
+ 	else if (ret < 0)
+@@ -1001,8 +1002,15 @@ ssize_t ntfs_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
+ 		goto out;
+ 	}
+ 
++	/*
++	 * The sizes were moved to end before the I/O, and only the rollback
++	 * at out: takes them back if the write fails.  An asynchronous write
++	 * that fails after submitting some bios returns -EIOCBQUEUED and
++	 * would skip it, so wait for such a write to complete.
++	 */
+ 	if (NInoNonResident(ni) && iocb->ki_flags & IOCB_DIRECT)
+-		ret = ntfs_dio_write_iter(iocb, from);
++		ret = ntfs_dio_write_iter(iocb, from, end > old_init_size ?
++					  IOMAP_DIO_FORCE_WAIT : 0);
+ 	else
+ 		ret = iomap_file_buffered_write(iocb, from, ntfs_write_iomap_next,
+ 				&ntfs_iomap_folio_ops, NULL);
