@@ -78,8 +78,10 @@ for k in range(3, len(sys.argv), 3):
     o, n, b = int(sys.argv[k]), int(sys.argv[k + 1]), int(sys.argv[k + 2], 0)
     exp[o:o + n] = bytes([b]) * n
 if bytes(exp) != d:
-    i = next((i for i in range(min(len(d), len(exp))) if d[i] != exp[i]), -1)
-    sys.exit("differs at %d (size %d)" % (i, len(d)))
+    bad = [i for i in range(min(len(d), len(exp))) if d[i] != exp[i]]
+    sys.exit("differs at %d (size %d): %d wrong bytes in [%d, %d), values %s" % (
+        bad[0] if bad else -1, len(d), len(bad), bad[0] if bad else -1,
+        bad[-1] + 1 if bad else -1, sorted({hex(d[i]) for i in bad})[:4]))
 PY
 }
 for cs in $(printf '%s\n' $CLUSTERS 1024 2048 | sort -nu); do
