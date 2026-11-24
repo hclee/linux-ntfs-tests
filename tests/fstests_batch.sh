@@ -28,6 +28,9 @@ for p in mkfs.ntfs fsck.ntfs; do
 	esac
 done
 mountpoint -q /mnt || mount -t tmpfs -o size=2500m tmpfs /mnt
+# check and the tests keep their temporary files in /tmp, which is the
+# host's, read-only (TMPDIR does not reach the guest scripts)
+mountpoint -q /tmp || mount -t tmpfs -o size=256m tmpfs /tmp
 # check and the tests write next to the tree; the host's root is read-only
 mkdir -p /mnt/xfstests
 tar -C "$FSTESTS" --exclude=.git -cf - . | tar -C /mnt/xfstests -xf -
