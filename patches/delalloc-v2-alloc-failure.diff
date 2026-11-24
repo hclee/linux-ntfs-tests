@@ -1,0 +1,95 @@
+diff --git a/fs/ntfs/attrib.c b/fs/ntfs/attrib.c
+index 3e20ace211..4ec4ca3d87 100644
+--- a/fs/ntfs/attrib.c
++++ b/fs/ntfs/attrib.c
+@@ -5493,6 +5493,19 @@ int ntfs_attr_truncate(struct ntfs_inode *ni, const s64 newsize)
+ 				    HOLES_NO : HOLES_OK);
+ }
+ 
++/*
++ * The allocator has taken the reservation of a delalloc run whose clusters
++ * are about to be freed again, the run staying delalloc: hold the
++ * reservation again first, so that no other writer can reserve the freed
++ * clusters in between.
++ */
++static void ntfs_map_cluster_rehold(struct ntfs_volume *vol, bool was_delalloc,
++				    s64 clu_count)
++{
++	if (was_delalloc)
++		ntfs_hold_dirty_clusters(vol, clu_count);
++}
++
+ int ntfs_attr_map_cluster(struct ntfs_inode *ni, s64 vcn_start, s64 *lcn_start,
+ 		s64 *lcn_count, s64 max_clu_count, bool *balloc, bool update_mp,
+ 		bool skip_holes)
+@@ -5504,6 +5517,7 @@ int ntfs_attr_map_cluster(struct ntfs_inode *ni, s64 vcn_start, s64 *lcn_start,
+ 	struct runlist_element *old_rl = NULL;
+ 	s64 vcn = vcn_start, lcn, clu_count;
+ 	s64 lcn_seek_from = -1;
++	bool was_delalloc;
+ 	int err = 0;
+ 	size_t new_rl_count, old_rl_count;
+ 
+@@ -5591,8 +5605,9 @@ int ntfs_attr_map_cluster(struct ntfs_inode *ni, s64 vcn_start, s64 *lcn_start,
+ 	 * fallocate(), direct I/O or page_mkwrite() have none and must leave
+ 	 * the reservations of other writers alone.
+ 	 */
++	was_delalloc = lcn == LCN_DELALLOC;
+ 	rlc = ntfs_cluster_alloc(vol, vcn, clu_count, lcn_seek_from, DATA_ZONE,
+-			false, true, lcn == LCN_DELALLOC);
++			false, true, was_delalloc);
+ 	if (IS_ERR(rlc)) {
+ 		err = PTR_ERR(rlc);
+ 		goto out;
+@@ -5606,6 +5621,7 @@ int ntfs_attr_map_cluster(struct ntfs_inode *ni, s64 vcn_start, s64 *lcn_start,
+ 			 old_rl_count * sizeof(*old_rl), GFP_NOFS);
+ 	if (!old_rl) {
+ 		err = -ENOMEM;
++		ntfs_map_cluster_rehold(vol, was_delalloc, clu_count);
+ 		if (ntfs_cluster_free_from_rl(vol, rlc)) {
+ 			ntfs_error(vol->sb,
+ 				   "Failed to free cluster allocation after runlist backup failure.");
+@@ -5619,6 +5635,7 @@ int ntfs_attr_map_cluster(struct ntfs_inode *ni, s64 vcn_start, s64 *lcn_start,
+ 	if (IS_ERR(rl)) {
+ 		ntfs_error(vol->sb, "Failed to merge runlists");
+ 		err = PTR_ERR(rl);
++		ntfs_map_cluster_rehold(vol, was_delalloc, clu_count);
+ 		if (ntfs_cluster_free_from_rl(vol, rlc))
+ 			ntfs_error(vol->sb, "Failed to free hot clusters.");
+ 		kvfree(rlc);
+@@ -5643,11 +5660,15 @@ int ntfs_attr_map_cluster(struct ntfs_inode *ni, s64 vcn_start, s64 *lcn_start,
+ 		if (err) {
+ 			s64 freed;
+ 
++			ntfs_map_cluster_rehold(vol, was_delalloc, clu_count);
+ 			freed = ntfs_cluster_free(ni, vcn, clu_count, ctx);
+ 			if (freed < 0 || freed != clu_count) {
+ 				ntfs_error(vol->sb,
+ 					   "Failed to free cluster allocation. Leaving inconsistent metadata.\n");
+ 				NVolSetErrors(vol);
++				/* The run keeps its clusters: drop the hold again. */
++				if (was_delalloc)
++					ntfs_release_dirty_clusters(vol, clu_count);
+ 				goto out;
+ 			}
+ 
+@@ -5665,6 +5686,7 @@ int ntfs_attr_map_cluster(struct ntfs_inode *ni, s64 vcn_start, s64 *lcn_start,
+ 					   "Failed to restore mapping pairs after allocation rollback.\n");
+ 				NVolSetErrors(vol);
+ 			}
++			goto out;
+ 		}
+ 	} else {
+ 		VFS_I(ni)->i_blocks += clu_count << (vol->cluster_size_bits - 9);
+diff --git a/fs/ntfs/lcnalloc.c b/fs/ntfs/lcnalloc.c
+index 7e00016f42..2fbc24e4c6 100644
+--- a/fs/ntfs/lcnalloc.c
++++ b/fs/ntfs/lcnalloc.c
+@@ -799,7 +799,6 @@ switch_to_data1_zone:		search_zone = 2;
+ 	} else if (err == -ENOSPC)
+ 		ntfs_debug("No space left at all, err = -ENOSPC, first free lcn = 0x%llx.",
+ 				vol->data1_zone_pos);
+-	atomic64_set(&vol->dirty_clusters, 0);
+ 
+ out_restore:
+ 	up_write(&vol->lcnbmp_lock);
