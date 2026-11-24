@@ -25,6 +25,10 @@ for cs in $CLUSTERS; do
 	rm -f $IMG; truncate -s 256M $IMG
 	mkntfs -F -Q -q -c $cs $IMG >/dev/null 2>&1 || { fail "mkntfs $cs"; continue; }
 	mount -i -t ntfs -o loop $IMG $M || { fail "mount $cs"; continue; }
+	# the operations fsx leaves out because the volume refuses them (only
+	# printed without -q): one operation on a scratch file
+	$FSX -N 1 -P $W $M/fsx.probe 2>&1 | grep "disabling" | sed "s/^/c$cs: /"
+	rm -f $M/fsx.probe
 	pids=""; bad=0
 	for j in $(seq 1 $FSX_JOBS); do
 		$FSX -q -N $FSX_OPS -S $((cs + j)) $FSX_ARGS -P $W $M/fsx.$j > $W/fsx-c$cs-$j.out 2>&1 &
