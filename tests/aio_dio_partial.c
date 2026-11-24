@@ -19,7 +19,7 @@
  * setup error.  nowait writes the MAPPED bytes alone with pwritev2() and
  * RWF_NOWAIT into a file of size 0: such a write moves the initialized
  * size and has to wait for its I/O, so it must fail with EAGAIN and leave
- * the size alone (exit status 1 otherwise), as on ext4 and XFS.
+ * the size alone (exit status 1 otherwise), as on ext4.
  */
 #define _GNU_SOURCE
 #include <errno.h>

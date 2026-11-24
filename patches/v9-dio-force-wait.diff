@@ -7,12 +7,13 @@ that fails after submitting some bios returns -EIOCBQUEUED, so the size
 rollback of ntfs_file_write_iter() does not run, and the sizes moved to
 the end of the write before the I/O leave the clusters it did not reach
 readable. Wait for direct writes that move the initialized size, as ext4
-and XFS do for extending writes, and have a non-blocking direct write
-that would have to wait retry with -EAGAIN before anything is changed, as
-they also do. Test: tests/aio_dio_partial.sh.
+does for extending direct writes, and have a non-blocking direct write
+that would have to wait, or that goes to a resident attribute, retry with
+-EAGAIN before anything is changed, as ext4 also does. Test:
+tests/aio_dio_partial.sh.
 
 diff --git a/fs/ntfs/file.c b/fs/ntfs/file.c
-index f3bdc54595..3260630e88 100644
+index f3bdc54595..86297a1633 100644
 --- a/fs/ntfs/file.c
 +++ b/fs/ntfs/file.c
 @@ -762,12 +762,13 @@ static const struct iomap_dio_ops ntfs_write_dio_ops = {
@@ -31,19 +32,21 @@ index f3bdc54595..3260630e88 100644
  	if (ret == -ENOTBLK)
  		ret = 0;
  	else if (ret < 0)
-@@ -955,6 +956,19 @@ ssize_t ntfs_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
+@@ -955,6 +956,21 @@ ssize_t ntfs_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
  	if (ret <= 0)
  		goto out_lock;
  
 +	/*
 +	 * A direct write that moves the initialized size waits for its I/O
 +	 * (see ntfs_dio_write_iter() below), which a non-blocking one must
-+	 * not do.  Have the caller retry it blocking before anything is
-+	 * changed, as ext4 and XFS do for extending direct writes.
++	 * not do, and a resident attribute is written through the page cache
++	 * or made non-resident first.  Have the caller retry such a write
++	 * blocking before anything is changed, as ext4 does for extending
++	 * direct writes.
 +	 */
 +	if (iocb->ki_flags & IOCB_NOWAIT && iocb->ki_flags & IOCB_DIRECT &&
-+	    NInoNonResident(ni) && !NInoCompressed(ni) &&
-+	    iocb->ki_pos + ret > ni->initialized_size) {
++	    (!NInoNonResident(ni) ||
++	     iocb->ki_pos + ret > ni->initialized_size)) {
 +		ret = -EAGAIN;
 +		goto out_lock;
 +	}
@@ -51,15 +54,17 @@ index f3bdc54595..3260630e88 100644
  	err = ntfs_file_modified(iocb);
  	if (err) {
  		ret = err;
-@@ -1001,8 +1015,15 @@ ssize_t ntfs_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
+@@ -1001,8 +1017,17 @@ ssize_t ntfs_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
  		goto out;
  	}
  
 +	/*
 +	 * The sizes were moved to end before the I/O, and only the rollback
 +	 * at out: takes them back if the write fails.  An asynchronous write
-+	 * that fails after submitting some bios returns -EIOCBQUEUED and
-+	 * would skip it, so wait for such a write to complete.
++	 * returns -EIOCBQUEUED once it has submitted bios and reports a later
++	 * failure, such as a fault on its source or an I/O error, only on
++	 * completion, which would skip the rollback.  Wait for such a write
++	 * to complete.
 +	 */
  	if (NInoNonResident(ni) && iocb->ki_flags & IOCB_DIRECT)
 -		ret = ntfs_dio_write_iter(iocb, from);

@@ -6,8 +6,9 @@
 # files each, on a volume whose free space held 0xee.  Checked right after
 # the write (aio_dio_partial, C, built by make -C tests) and after a
 # remount; ntfsck -n at the end.  A non-blocking direct write that would
-# move the initialized size (pwritev2() with RWF_NOWAIT) must fail with
-# EAGAIN and leave the size alone.  Fails on ntfs-next for the asynchronous
+# move the initialized size (pwritev2() with RWF_NOWAIT, 4 MiB, all of it
+# mapped) must fail with EAGAIN and leave the size alone, into a reserved
+# file and into a new empty (resident) one.  Fails on ntfs-next for the asynchronous
 # write: iomap returns -EIOCBQUEUED while bios are in flight, so the size
 # rollback of a failed write does not run.
 . "$HARNESS/guest_lib.sh"
@@ -43,12 +44,16 @@ PY
 				echo "PASS: $tag" || fail "$tag: old data readable"
 		done
 	done
-	tag="nowait dio c$cs"; mark "$tag"
-	f=$M/nowait
-	xfs_io -f -c "falloc -k 0 $((6 << 20))" $f
-	"$BIN" $f $((4 << 20)) $((6 << 20)) nowait &&
-		echo "PASS: $tag returns EAGAIN" || fail "$tag: no EAGAIN or the size moved"
-	rm -f $f
+	for kind in reserved empty; do
+		tag="nowait dio into a $kind file c$cs"; mark "$tag"
+		f=$M/nowait
+		rm -f $f; touch $f
+		# an empty file is resident until the write makes it non-resident
+		[ $kind = reserved ] && xfs_io -c "falloc -k 0 $((6 << 20))" $f
+		"$BIN" $f $((4 << 20)) $((6 << 20)) nowait &&
+			echo "PASS: $tag returns EAGAIN" || fail "$tag: no EAGAIN or the size moved"
+		rm -f $f
+	done
 	umount $M
 	mount -i -t ntfs -o loop $IMG $M || { fail "remount c$cs"; continue; }
 	for f in $M/aio-* $M/sync-*; do
