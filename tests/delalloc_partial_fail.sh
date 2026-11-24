@@ -24,6 +24,11 @@
 #     read into the page cache first, allocates one cluster (FAIL).  A write
 #     that ends above the initialized size drops the page cache before it
 #     copies, so only this file has clean cached blocks behind the dirty ones.
+#   - a short copy that starts one cluster into such a hole and stops 512
+#     bytes into its second cluster allocates those two clusters only: the
+#     rest of the second cluster must reach the disk, but the clean blocks
+#     around it in the same folio (a hole before the write, an unused
+#     reservation after it) must stay clean (FAIL)
 #   - with clusters smaller than a page, a write that fails on its first byte
 #     over the clean cached blocks of a folio whose last cluster is dirty
 #     reserves nothing (FAIL)
@@ -124,6 +129,21 @@ for cs in $(printf '%s\n' $CLUSTERS 1024 2048 | sort -nu); do
 	[ $((free0 - free1)) -le 1 ] &&
 		echo "PASS: $tag keeps only the cluster written" ||
 		fail "$tag: $((free0 - free1)) clusters allocated or reserved, 1 expected"
+	tag="short copy ending inside a cluster of a cached hole c$cs"; mark "$tag"
+	f=$M/short-tail
+	exp_tail="$cs $((cs + 512)) 0xab $((size - 512)) 512 0xcd"
+	xfs_io -f -c "truncate $size" -c "pwrite -q $((size - 512)) 512" -c fsync $f; sync
+	free0=$(stat -f -c %f $M)
+	shortcopy $f $cs $((8 * unit)) $((cs + 512)) || fail "$tag: the write was not $((cs + 512)) bytes"
+	sync
+	free1=$(stat -f -c %f $M)
+	zeroes $f $size $exp_tail && echo "PASS: $tag contents (cache)" || fail "$tag contents (cache)"
+	echo 3 > /proc/sys/vm/drop_caches
+	zeroes $f $size $exp_tail && echo "PASS: $tag contents (disk)" || fail "$tag contents (disk)"
+	echo "$tag: $((free0 - free1)) clusters allocated or reserved by the short write"
+	[ $((free0 - free1)) -le 2 ] &&
+		echo "PASS: $tag keeps only the two clusters written" ||
+		fail "$tag: $((free0 - free1)) clusters allocated or reserved, 2 expected"
 	if [ $cs -lt 4096 ]; then
 		tag="failed write over clean blocks of a dirty folio c$cs"; mark "$tag"
 		f=$M/dirty
@@ -153,7 +173,7 @@ for cs in $(printf '%s\n' $CLUSTERS 1024 2048 | sort -nu); do
 	mount -i -t ntfs -o loop $IMG $M || { fail "remount c$cs"; continue; }
 	zeroes $M/f-0 $size && zeroes $M/f-full $size $((size - 512)) 512 0xcd &&
 		echo "PASS: contents after remount c$cs" || fail "contents after remount c$cs"
-	zeroes $M/short-cs $size $exp_cs && { [ $cs -ge 4096 ] || zeroes $M/dirty $size $exp_dirty; } &&
+	zeroes $M/short-cs $size $exp_cs && zeroes $M/short-tail $size $exp_tail && { [ $cs -ge 4096 ] || zeroes $M/dirty $size $exp_dirty; } &&
 		echo "PASS: cached hole contents after remount c$cs" ||
 		fail "cached hole contents after remount c$cs"
 	python3 -c "import sys; d=open(sys.argv[1],'rb').read(); sys.exit(d != b'\x42'*len(d))" $f &&

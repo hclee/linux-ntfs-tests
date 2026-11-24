@@ -1,0 +1,74 @@
+diff --git a/fs/iomap/buffered-io.c b/fs/iomap/buffered-io.c
+index 2eb8070e34..8c8851d16f 100644
+--- a/fs/iomap/buffered-io.c
++++ b/fs/iomap/buffered-io.c
+@@ -858,6 +858,25 @@ bool iomap_dirty_folio(struct address_space *mapping, struct folio *folio)
+ }
+ EXPORT_SYMBOL_GPL(iomap_dirty_folio);
+ 
++/**
++ * iomap_dirty_folio_range - mark a range of a folio dirty
++ * @folio: the locked, uptodate folio
++ * @off: byte offset of the range in @folio
++ * @len: length of the range in bytes
++ *
++ * Mark the blocks that cover [@off, @off + @len) and @folio dirty, but none
++ * of the other blocks of @folio, so that writeback writes only those blocks.
++ */
++void iomap_dirty_folio_range(struct folio *folio, size_t off, size_t len)
++{
++	struct address_space *mapping = folio->mapping;
++
++	ifs_alloc(mapping->host, folio, 0);
++	iomap_set_range_dirty(folio, off, len);
++	filemap_dirty_folio(mapping, folio);
++}
++EXPORT_SYMBOL_GPL(iomap_dirty_folio_range);
++
+ static void
+ iomap_write_failed(struct inode *inode, loff_t pos, unsigned len)
+ {
+diff --git a/fs/ntfs/iomap.c b/fs/ntfs/iomap.c
+index 5f8e9afed4..4d4155f6b4 100644
+--- a/fs/ntfs/iomap.c
++++ b/fs/ntfs/iomap.c
+@@ -921,8 +921,10 @@ static bool ntfs_pos_is_delalloc(struct inode *inode, loff_t pos)
+  * Make writeback write all of [start, end), the rest of a cluster that was a
+  * hole and that a short buffered write filled only in part.  Folios in the
+  * page cache keep their contents (the zeroes __iomap_write_begin() put
+- * there, or data an mmap write added meanwhile) and are dirtied as a whole;
+- * the rest of the range is zeroed while the cluster is still delalloc.  Once
++ * there, or data an mmap write added meanwhile), and only their blocks in
++ * the range are dirtied: other clean blocks of the folio may be holes, or
++ * delalloc clusters the write did not reach, which the caller punches out.
++ * The rest of the range is zeroed while the cluster is still delalloc.  Once
+  * a write fault or writeback has allocated it, the cluster was zeroed on the
+  * disk before it was mapped, and what an mmap write put there since may only
+  * have left the page cache: it must not be zeroed again.  The caller holds
+@@ -947,11 +949,13 @@ static int ntfs_dirty_cluster_tail(struct inode *inode, loff_t start,
+ 								 next - start);
+ 		} else {
+ 			bool uptodate = folio_test_uptodate(folio);
++			size_t off = offset_in_folio(folio, start);
+ 
+ 			next = min_t(loff_t, folio_pos(folio) +
+ 				     folio_size(folio), end);
+ 			if (uptodate)
+-				folio_mark_dirty(folio);
++				iomap_dirty_folio_range(folio, off,
++							next - start);
+ 			folio_unlock(folio);
+ 			folio_put(folio);
+ 			if (!uptodate && ntfs_pos_is_delalloc(inode, start))
+diff --git a/include/linux/iomap.h b/include/linux/iomap.h
+index 78a1b7603a..6a6e67b87f 100644
+--- a/include/linux/iomap.h
++++ b/include/linux/iomap.h
+@@ -445,6 +445,7 @@ struct folio *iomap_get_folio(struct iomap_iter *iter, loff_t pos, size_t len);
+ bool iomap_release_folio(struct folio *folio, gfp_t gfp_flags);
+ void iomap_invalidate_folio(struct folio *folio, size_t offset, size_t len);
+ bool iomap_dirty_folio(struct address_space *mapping, struct folio *folio);
++void iomap_dirty_folio_range(struct folio *folio, size_t off, size_t len);
+ void iomap_folio_mark_uptodate(struct folio *folio);
+ int iomap_file_unshare(struct inode *inode, loff_t pos, loff_t len,
+ 		iomap_iter_next_fn next,
