@@ -29,23 +29,30 @@ index 2eb8070e34..8c8851d16f 100644
  iomap_write_failed(struct inode *inode, loff_t pos, unsigned len)
  {
 diff --git a/fs/ntfs/iomap.c b/fs/ntfs/iomap.c
-index 5f8e9afed4..4d4155f6b4 100644
+index 5f8e9afed4..bdb176fdd4 100644
 --- a/fs/ntfs/iomap.c
 +++ b/fs/ntfs/iomap.c
-@@ -921,8 +921,10 @@ static bool ntfs_pos_is_delalloc(struct inode *inode, loff_t pos)
+@@ -921,12 +921,13 @@ static bool ntfs_pos_is_delalloc(struct inode *inode, loff_t pos)
   * Make writeback write all of [start, end), the rest of a cluster that was a
   * hole and that a short buffered write filled only in part.  Folios in the
   * page cache keep their contents (the zeroes __iomap_write_begin() put
 - * there, or data an mmap write added meanwhile) and are dirtied as a whole;
 - * the rest of the range is zeroed while the cluster is still delalloc.  Once
+- * a write fault or writeback has allocated it, the cluster was zeroed on the
+- * disk before it was mapped, and what an mmap write put there since may only
+- * have left the page cache: it must not be zeroed again.  The caller holds
+- * the invalidate lock.
 + * there, or data an mmap write added meanwhile), and only their blocks in
 + * the range are dirtied: other clean blocks of the folio may be holes, or
 + * delalloc clusters the write did not reach, which the caller punches out.
-+ * The rest of the range is zeroed while the cluster is still delalloc.  Once
-  * a write fault or writeback has allocated it, the cluster was zeroed on the
-  * disk before it was mapped, and what an mmap write put there since may only
-  * have left the page cache: it must not be zeroed again.  The caller holds
-@@ -947,11 +949,13 @@ static int ntfs_dirty_cluster_tail(struct inode *inode, loff_t start,
++ * The rest of the range is zeroed only while the cluster is still delalloc:
++ * once a write fault or writeback has allocated it, what an mmap write put
++ * there since may be on the disk only, and zeroing the page cache would
++ * overwrite it.  The caller holds the invalidate lock.
+  */
+ static int ntfs_dirty_cluster_tail(struct inode *inode, loff_t start,
+ 				   loff_t end)
+@@ -947,11 +948,13 @@ static int ntfs_dirty_cluster_tail(struct inode *inode, loff_t start,
  								 next - start);
  		} else {
  			bool uptodate = folio_test_uptodate(folio);
