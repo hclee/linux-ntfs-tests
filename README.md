@@ -101,6 +101,7 @@ its usage with `--help`.
 
 | Test | Checks |
 |---|---|
+| aio_dio_partial | an O_DIRECT write into reserved clusters that fails part way (source unmapped), asynchronous and synchronous, leaves no old disk contents readable |
 | delalloc_accounting | free space reported by statfs() while delayed allocations are pending, after truncate, unlink and remount |
 | delalloc_alloc_failure | a cluster allocation that fails with ENOMEM keeps other files' delalloc reservations |
 | delalloc_failed_write | a failed buffered write into a hole releases its reservation |
