@@ -14,6 +14,7 @@
 # tools, default: found in PATH), FIXTURES (directory of extra NTFS images
 # c*.img for the sparse_cu tests, default none: those parts are skipped),
 # XFSTESTS (an xfstests checkout with fsx built, for fsx_parallel.sh),
+# FSTESTS (a built xfstests tree with fstests/patches, for fstests_batch.sh),
 # CLUSTERS (default
 # "512 4096 16384 65536"), DMESG_IGNORE (see guest_lib.sh) and may source
 # guest_lib.sh. GUEST_ENV="VAR=value ..." exports more variables to the
@@ -37,6 +38,7 @@ export NTFSCK=$ntfsck
 export NTFSINFO=$ntfsinfo
 export FIXTURES=${FIXTURES:-}
 export XFSTESTS=${XFSTESTS:-}
+export FSTESTS=${FSTESTS:-}
 export CLUSTERS="${CLUSTERS:-512 4096 16384 65536}"
 export DMESG_IGNORE="${DMESG_IGNORE:-}"
 $(for kv in ${GUEST_ENV:-}; do printf 'export %q\n' "$kv"; done)

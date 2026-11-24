@@ -1,0 +1,99 @@
+From aa3bfac90bb2eec4f35e0fc55395982754044f03 Mon Sep 17 00:00:00 2001
+From: Ernest Borowski <ernest.borowski.git@proton.me>
+Date: Wed, 25 Nov 2026 00:13:31 +0100
+Subject: [PATCH 4/4] generic: test a short copy into a hole of reused blocks
+
+When a buffered write into a hole stops part way through a block because
+its source buffer runs into an unreadable page, only the bytes copied are
+dirty. A filesystem that allocates in units larger than the blocks it
+tracks as dirty, as ntfs does, has to zero the rest of the allocation, or
+reads return what the reused clusters held before. On ntfs the rest of the
+cluster read back the old file contents after an fsync and a remount, with
+4 KiB and with 64 KiB clusters; the fix is "ntfs: zero the rest of a new
+cluster after a short buffered write" from the ntfs delayed allocation
+series, not merged yet. Free the blocks of a filled file by truncating it
+to zero and back, write its last byte, write two and a half blocks into the
+hole from a buffer that is readable for 1000, 5096 or 12800 bytes, and
+compare the file with the expected contents after a remount.
+
+Link: https://lore.kernel.org/all/20261124-b4-ntfs-delalloc-fixes-v2-0-f394c800ec03@proton.me/
+---
+ tests/generic/818     | 56 +++++++++++++++++++++++++++++++++++++++++++
+ tests/generic/818.out |  2 ++
+ 2 files changed, 58 insertions(+)
+ create mode 100755 tests/generic/818
+ create mode 100644 tests/generic/818.out
+
+diff --git a/tests/generic/818 b/tests/generic/818
+new file mode 100755
+index 00000000..eef0aba5
+--- /dev/null
++++ b/tests/generic/818
+@@ -0,0 +1,56 @@
++#! /bin/bash
++# SPDX-License-Identifier: GPL-2.0
++# Copyright (c) 2026 Ernest Borowski.  All Rights Reserved.
++#
++# FS QA Test No. 818
++#
++# A buffered write into a hole whose copy from user space stops part way
++# through a block, because the source buffer runs into an unreadable page,
++# must leave everything it did not write reading as zeroes once the data is on
++# the disk.  The blocks the hole gets may have held data before, so a block
++# that is allocated but only partly written would expose that old data.
++#
++# Fill a file and fsync it, truncate it to zero and back to its size so that
++# its old blocks are free again, write its last byte, then write two and a
++# half blocks at a block boundary from a buffer with only part of it readable.
++# After an fsync and a remount the file must hold the bytes the write returned
++# and zeroes around them.
++#
++. ./common/preamble
++_begin_fstest auto quick rw
++
++_fixed_by_fs_commit ntfs xxxxxxxxxxxx \
++	"ntfs: zero the rest of a new cluster after a short buffered write"
++
++_require_scratch
++_require_test_program "pwrite-short-copy"
++
++_scratch_mkfs >> $seqres.full 2>&1
++_scratch_mount
++
++blksz=$(_get_file_block_size $SCRATCH_MNT)
++size=$((32 * blksz))
++off=$((8 * blksz))
++len=$((2 * blksz + blksz / 2))
++file=$SCRATCH_MNT/file
++
++for copy in 1000 5096 12800; do
++	$XFS_IO_PROG -f -c "pwrite -q -S 0xab 0 $size" -c fsync \
++		-c "truncate 0" -c "truncate $size" \
++		-c "pwrite -q -S 0x01 $((size - 1)) 1" $file
++	ret=$($here/src/pwrite-short-copy $file $off $len $copy)
++	echo "copy $copy: write of $len bytes at $off returned $ret" >> $seqres.full
++	$XFS_IO_PROG -c fsync $file
++	_scratch_cycle_mount
++
++	rm -f $tmp.expected
++	$XFS_IO_PROG -f -c "truncate $size" \
++		-c "pwrite -q -S 0x01 $((size - 1)) 1" $tmp.expected
++	[ "$ret" -gt 0 ] && \
++		$XFS_IO_PROG -c "pwrite -q -S 0x5c $off $ret" $tmp.expected
++	cmp -s $file $tmp.expected || \
++		echo "copy $copy: file contents differ after a short copy"
++done
++
++echo "Silence is golden"
++_exit 0
+diff --git a/tests/generic/818.out b/tests/generic/818.out
+new file mode 100644
+index 00000000..cb099786
+--- /dev/null
++++ b/tests/generic/818.out
+@@ -0,0 +1,2 @@
++QA output created by 818
++Silence is golden
+-- 
+2.56.1
+

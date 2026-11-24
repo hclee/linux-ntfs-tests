@@ -3,7 +3,9 @@
 # Everything a reproducer run needs, for the job's distribution: packages and
 # KVM access, ntfsprogs-plus (ntfsck, ntfsinfo) in
 # $RUNNER_TEMP/ntfsprogs-plus-root, xfstests' fsx in $RUNNER_TEMP/xfstests
-# (XFSTESTS is set for the later steps), the kernel source at REF of REPO in
+# (XFSTESTS is set for the later steps), the whole xfstests tree at
+# fstests/base with fstests/patches applied in $RUNNER_TEMP/fstests (FSTESTS
+# is set), the kernel source at REF of REPO in
 # $RUNNER_TEMP/ntfs with PATCHES applied (vm/apply_patches.sh), and the
 # kernel built in $RUNNER_TEMP/build through the shared compiler cache.
 # Used by ci.yml and test-kernel.yml after actions/checkout.
@@ -42,7 +44,8 @@ runs:
         # shellcheck disable=SC2086 # one word per package
         pacman -Syu --noconfirm --needed qemu-base gcc make cpio python zstd xz bc bison \
           flex libelf openssl ccache perl kmod pahole ntfs-3g ntfsprogs xfsprogs autoconf \
-          automake libtool pkgconf util-linux-libs gnutls libgcrypt git attr acl b4
+          automake libtool pkgconf util-linux-libs gnutls libgcrypt git attr acl b4 \
+          libaio liburing libcap gawk psmisc
     - name: Packages and KVM access (Ubuntu)
       if: inputs.distro != 'arch'
       shell: bash
@@ -52,7 +55,8 @@ runs:
           cpio python3 zstd xz-utils bc bison flex libelf-dev libssl-dev ccache perl kmod \
           dwarves ntfs-3g xfsprogs autoconf automake libtool pkg-config libblkid-dev \
           uuid-dev libgnutls28-dev libgcrypt20-dev git ca-certificates attr b4 \
-          xfslibs-dev libacl1-dev
+          xfslibs-dev libacl1-dev libaio-dev liburing-dev libcap-dev gawk psmisc \
+          uuid-runtime
         echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' |
           sudo tee /etc/udev/rules.d/99-kvm4all.rules
         sudo udevadm control --reload-rules
@@ -84,6 +88,21 @@ runs:
         make -s -C ltp fsx
         test -x ltp/fsx
         echo "XFSTESTS=$RUNNER_TEMP/xfstests" >> "$GITHUB_ENV"
+    # the whole tree, for tests/fstests_batch.sh: the commit in fstests/base
+    # with the fstests/patches series (tests not merged upstream yet) on top
+    - name: fstests (xfstests with fstests/patches)
+      shell: bash
+      run: |
+        git init -q "$RUNNER_TEMP/fstests"
+        cd "$RUNNER_TEMP/fstests"
+        git fetch -q --depth 1 https://git.kernel.org/pub/scm/fs/xfs/xfstests-dev.git \
+          "$(cat "$GITHUB_WORKSPACE/fstests/base")"
+        git checkout -q FETCH_HEAD
+        git -c user.name=ci -c user.email=ci@localhost am -q "$GITHUB_WORKSPACE"/fstests/patches/*.patch
+        git log --oneline -n 8
+        make -s -j"$(nproc)" > make.log 2>&1 || { tail -n 40 make.log; exit 1; }
+        test -x check && test -d src
+        echo "FSTESTS=$RUNNER_TEMP/fstests" >> "$GITHUB_ENV"
     - name: Kernel source
       id: src
       shell: bash

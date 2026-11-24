@@ -28,7 +28,7 @@ if [ $# = 0 ]; then
 	slow="ntfs_compressed_stages.sh sparse_cu_crafted.sh hole_fill_stale.sh
 		sparse_cu_rw.sh stale_wb_race.sh"
 	set -- $slow $(cd "$here" && ls delalloc_*.sh hole_fill_stale.sh short_copy_stale.sh \
-		short_write_size.sh stale_wb_race.sh slab_cache_names.sh sparse_cu_*.sh \
+		short_write_size.sh stale_wb_race.sh slab_cache_names.sh sparse_cu_*.sh fstests_batch.sh \
 		ntfs_compressed_*.sh fsx_parallel.sh killed_short_write.sh killed_write_mmap.sh \
 		keep_size_short_write.sh stale_write_mapping.sh aio_dio_partial.sh 2>/dev/null | grep -vxF "$(printf '%s\n' $slow)")
 fi

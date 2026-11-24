@@ -29,6 +29,10 @@ ntfs-next is expected to give, and CI flags any test whose result changes.
   `SKIP=fsx_parallel.sh`); `make configure && ./configure && make -C lib &&
   make -C ltp fsx` builds only fsx, as CI does. The crash suite also needs
   `src/log-writes/replay-log` from a full xfstests build.
+- For `fstests_batch`: a full xfstests build (`FSTESTS=/path/to/xfstests`)
+  of the commit in `fstests/base` with `git am fstests/patches/*.patch` on
+  top (fstests tests not merged upstream yet, and FSTYP=ntfs support), and
+  ntfsprogs-plus installed with its `mkfs.ntfs` and `fsck.ntfs` links.
 
 Debian or Ubuntu (Ubuntu 26.04 is tested in CI):
 
@@ -124,6 +128,7 @@ its usage with `--help`.
 | sparse_cu_* | sparse files with unusual compression unit values, including crafted images |
 | slab_cache_names | slab cache names stay unique with both NTFS drivers loaded |
 | fsx_parallel | xfstests' fsx, 4 instances of 40000 operations in parallel on each cluster size, then ntfsck |
+| fstests_batch | the fstests in fstests/patches (generic/816 to 818) with FSTYP=ntfs, one section per cluster size 512, 4096 and 65536; one PASS or FAIL line per test and section, results in fstests-results/ |
 | ntfs3_extent_records, ntfs3_readdir_large | fs/ntfs3: attribute lists and extents, large directories (need fs/ntfs3 built as configured by build_kernel.sh) |
 
 The suites run by `tests/run_kernel_tests.sh` need a kernel with the fs/ntfs
