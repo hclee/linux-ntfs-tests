@@ -11,12 +11,15 @@
  * asynchronous write returns -EIOCBQUEUED while its bios are in flight and
  * then completes with the error, so the rollback does not run.
  *
- * Usage: aio_dio_partial FILE MAPPED LENGTH aio|sync
+ * Usage: aio_dio_partial FILE MAPPED LENGTH aio|sync|nowait
  * Writes LENGTH bytes at offset 0 with io_submit() (aio) or pwritev()
  * (sync), then reads the whole file back with O_DIRECT and prints the
  * write's result, the file size and how many bytes read back as 0xee.
  * Exit status 0 when no 0xee byte is readable, 1 when some are, 2 on a
- * setup error.
+ * setup error.  nowait writes the MAPPED bytes alone with pwritev2() and
+ * RWF_NOWAIT into a file of size 0: such a write moves the initialized
+ * size and has to wait for its I/O, so it must fail with EAGAIN and leave
+ * the size alone (exit status 1 otherwise), as on ext4 and XFS.
  */
 #define _GNU_SOURCE
 #include <errno.h>
@@ -82,6 +85,12 @@ int main(int argc, char **argv)
 			die("io_getevents");
 		res = ev.res;
 		syscall(SYS_io_destroy, ctx);
+	} else if (!strcmp(argv[4], "nowait")) {
+		struct iovec iov = { src, mapped };
+
+		res = pwritev2(fd, &iov, 1, 0, RWF_NOWAIT);
+		if (res < 0)
+			res = -errno;
 	} else {
 		struct iovec iov = { src, len };
 
@@ -106,5 +115,7 @@ int main(int argc, char **argv)
 	printf("%s write of %zu (%zu mapped): result %lld, size %lld, "
 	       "%zu bytes of old data\n", argv[4], len, mapped, res,
 	       (long long)st.st_size, old);
+	if (!strcmp(argv[4], "nowait") && (res != -EAGAIN || st.st_size))
+		return 1;
 	return old ? 1 : 0;
 }
