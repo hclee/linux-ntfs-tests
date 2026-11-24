@@ -22,6 +22,13 @@
 #   - at most the two zeroed edge clusters stay allocated (FAIL)
 #   - a short copy of 512 bytes into a cached hole allocates one cluster
 #     (FAIL)
+#   - a short copy of one cluster into a hole below the initialized size,
+#     read into the page cache first, allocates one cluster (FAIL).  A write
+#     that ends above the initialized size drops the page cache before it
+#     copies, so only this file has clean cached blocks behind the dirty ones.
+#   - with clusters smaller than a page, a write that fails on its first byte
+#     over the clean cached blocks of a folio whose last cluster is dirty
+#     reserves nothing (FAIL)
 #   - ntfsck -n is clean.
 . "$HARNESS/guest_lib.sh"
 mountpoint -q /mnt || mount -t tmpfs -o size=1g tmpfs /mnt
@@ -36,7 +43,7 @@ r = libc.pwrite(fd, 4096, int(sys.argv[3]), int(sys.argv[2]))
 print("pwrite from a bad buffer:", r, os.strerror(ctypes.get_errno()))
 PY
 }
-shortcopy() {	# shortcopy FILE OFFSET LENGTH: pwrite() whose source faults after 512 bytes
+shortcopy() {	# shortcopy FILE OFFSET LENGTH [VALID]: pwrite() whose source faults after VALID (512) bytes
 	python3 - "$@" <<'PY'
 import ctypes, mmap, os, sys
 libc = ctypes.CDLL(None, use_errno=True)
@@ -47,26 +54,28 @@ libc.munmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
 libc.pwrite.restype = ctypes.c_ssize_t
 libc.pwrite.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_long]
 pg = mmap.PAGESIZE
-buf = libc.mmap(None, 2 * pg, mmap.PROT_READ | mmap.PROT_WRITE,
-                mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS, -1, 0)
-libc.munmap(buf + pg, pg)
-src = buf + pg - 512
-ctypes.memset(src, 0xab, 512)
 off, n = int(sys.argv[2]), int(sys.argv[3])
+valid = int(sys.argv[4]) if len(sys.argv) > 4 else 512
+size = -(-valid // pg) * pg
+buf = libc.mmap(None, size + pg, mmap.PROT_READ | mmap.PROT_WRITE,
+                mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS, -1, 0)
+libc.munmap(buf + size, pg)
+src = buf + size - valid
+ctypes.memset(src, 0xab, valid)
 fd = os.open(sys.argv[1], os.O_RDWR)
 os.pread(fd, n, off)	# the hole's folios become uptodate, so a short copy counts
 r = libc.pwrite(fd, src, n, off)
-print("pwrite whose source faults after 512 bytes:", r)
-sys.exit(r != 512)
+print("pwrite whose source faults after %d bytes:" % valid, r)
+sys.exit(r != valid)
 PY
 }
-zeroes() {	# zeroes FILE SIZE [OFF LEN BYTE]: contents check
+zeroes() {	# zeroes FILE SIZE [OFF LEN BYTE]...: contents check
 	python3 - "$@" <<'PY'
 import sys
 d = open(sys.argv[1], "rb").read()
 exp = bytearray(int(sys.argv[2]))
-if len(sys.argv) > 3:
-    o, n, b = int(sys.argv[3]), int(sys.argv[4]), int(sys.argv[5], 0)
+for k in range(3, len(sys.argv), 3):
+    o, n, b = int(sys.argv[k]), int(sys.argv[k + 1]), int(sys.argv[k + 2], 0)
     exp[o:o + n] = bytes([b]) * n
 if bytes(exp) != d:
     i = next((i for i in range(min(len(d), len(exp))) if d[i] != exp[i]), -1)
@@ -114,6 +123,39 @@ for cs in $(printf '%s\n' $CLUSTERS 1024 2048 | sort -nu); do
 	[ $((free0 - free1)) -le 1 ] &&
 		echo "PASS: $tag allocates only the cluster written" ||
 		fail "$tag: $((free0 - free1)) clusters allocated, 1 expected"
+	tag="short copy of one cluster into a cached hole c$cs"; mark "$tag"
+	f=$M/short-cs
+	exp_cs="0 $cs 0xab $((size - 512)) 512 0xcd"
+	xfs_io -f -c "truncate $size" -c "pwrite -q $((size - 512)) 512" -c fsync $f; sync
+	free0=$(stat -f -c %f $M)
+	shortcopy $f 0 $((8 * unit)) $cs || fail "$tag: the write was not $cs bytes"
+	sync
+	free1=$(stat -f -c %f $M)
+	zeroes $f $size $exp_cs && echo "PASS: $tag contents (cache)" || fail "$tag contents (cache)"
+	echo 3 > /proc/sys/vm/drop_caches
+	zeroes $f $size $exp_cs && echo "PASS: $tag contents (disk)" || fail "$tag contents (disk)"
+	echo "$tag: $((free0 - free1)) clusters allocated or reserved by the short write"
+	[ $((free0 - free1)) -le 1 ] &&
+		echo "PASS: $tag keeps only the cluster written" ||
+		fail "$tag: $((free0 - free1)) clusters allocated or reserved, 1 expected"
+	if [ $cs -lt 4096 ]; then
+		tag="failed write over clean blocks of a dirty folio c$cs"; mark "$tag"
+		f=$M/dirty
+		exp_dirty="$((4096 - cs)) $cs 0x5a $((size - 512)) 512 0xcd"
+		xfs_io -f -c "truncate $size" -c "pwrite -q $((size - 512)) 512" -c fsync $f; sync
+		free0=$(stat -f -c %f $M)
+		xfs_io -c "pread -q 0 4096" -c "pwrite -q -S 0x5a $((4096 - cs)) $cs" $f
+		efault $f 0 $((4096 - cs))
+		sync
+		free1=$(stat -f -c %f $M)
+		zeroes $f $size $exp_dirty && echo "PASS: $tag contents (cache)" || fail "$tag contents (cache)"
+		echo 3 > /proc/sys/vm/drop_caches
+		zeroes $f $size $exp_dirty && echo "PASS: $tag contents (disk)" || fail "$tag contents (disk)"
+		echo "$tag: $((free0 - free1)) clusters allocated or reserved by the two writes"
+		[ $((free0 - free1)) -le 1 ] &&
+			echo "PASS: $tag keeps only the cluster written" ||
+			fail "$tag: $((free0 - free1)) clusters allocated or reserved, 1 expected"
+	fi
 	tag="partial writeback c$cs"; mark "$tag"
 	f=$M/run
 	xfs_io -f -c "pwrite -q -S 0x42 0 $((16 * unit))" $f
@@ -125,6 +167,9 @@ for cs in $(printf '%s\n' $CLUSTERS 1024 2048 | sort -nu); do
 	mount -i -t ntfs -o loop $IMG $M || { fail "remount c$cs"; continue; }
 	zeroes $M/f-0 $size && zeroes $M/f-full $size $((size - 512)) 512 0xcd &&
 		echo "PASS: contents after remount c$cs" || fail "contents after remount c$cs"
+	zeroes $M/short-cs $size $exp_cs && { [ $cs -ge 4096 ] || zeroes $M/dirty $size $exp_dirty; } &&
+		echo "PASS: cached hole contents after remount c$cs" ||
+		fail "cached hole contents after remount c$cs"
 	python3 -c "import sys; d=open(sys.argv[1],'rb').read(); sys.exit(d != b'\x42'*len(d))" $f &&
 		echo "PASS: $tag contents" || fail "$tag contents"
 	umount $M
