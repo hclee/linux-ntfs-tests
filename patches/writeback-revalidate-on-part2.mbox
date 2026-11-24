@@ -1,0 +1,203 @@
+From 396df3a487bce3c80f963525e772a68fd7bcb554 Mon Sep 17 00:00:00 2001
+From: Ernest Borowski <ernest.borowski.git@proton.me>
+Date: Sat, 14 Nov 2026 12:41:49 +0100
+Subject: [PATCH] ntfs: revalidate the cached writeback mapping after runlist
+ changes
+
+ntfs_writeback_range() maps a range once and keeps using the mapping in
+wpc->iomap for every later folio it covers, for as long as the writeback
+pass runs. Nothing checks whether the runlist changed in the meantime.
+A truncate, a collapse or insert range, or a hole punch that frees or
+shifts clusters while a writeback pass is running leaves that pass with
+a mapping to clusters that no longer belong to the file, or now belong
+to another part of it; a folio dirtied again in that window would be
+written there.
+
+Give each ntfs_inode a counter that is bumped, under the runlist lock,
+whenever clusters that are already mapped are freed or change place, and
+store it in iomap.validity_cookie when ntfs_writeback_range() maps a
+range. The cached mapping is reused only while the counter is unchanged.
+The counter is read without locks. The folio lock taken by writeback
+does not order that read after a truncate into the middle of the folio,
+which unlocks the folio before it frees the clusters past the new end,
+so a read barrier orders it after writeback's read of i_size: writeback
+that sees the file extended again also sees the counter bumped by the
+truncate.
+
+A hole that a buffered write or a write fault fills does not bump the
+counter, yet writeback can map a hole: when clusters are smaller than a
+folio and the folio is dirtied as a whole, some of its dirty blocks can
+lie in a hole. A hole mapping is therefore never reused; writeback
+would otherwise skip a folio dirtied in a part of the hole that was
+filled after the mapping was cached, and lose its data.
+
+The counter is separate from alloc_seq, which a buffered write uses to
+notice that a write fault or writeback allocated its delalloc clusters.
+Allocations do not bump this one: writeback allocates clusters itself
+after reading it, and an allocation does not change a mapping writeback
+has cached.  Frees and moves do not bump alloc_seq: a buffered write
+holds the inode lock, which keeps truncate and fallocate out.
+
+Fixes: b041ca562526 ("ntfs: update iomap and address space operations")
+Cc: stable@vger.kernel.org
+---
+ fs/ntfs/attrib.c |  5 +++++
+ fs/ntfs/inode.c  |  1 +
+ fs/ntfs/inode.h  | 33 +++++++++++++++++++++++++++++++++
+ fs/ntfs/iomap.c  | 19 +++++++++++++++++--
+ 4 files changed, 56 insertions(+), 2 deletions(-)
+
+diff --git a/fs/ntfs/attrib.c b/fs/ntfs/attrib.c
+index f2d5fafbf4..f60c7a987e 100644
+--- a/fs/ntfs/attrib.c
++++ b/fs/ntfs/attrib.c
+@@ -4591,6 +4591,7 @@ static int ntfs_non_resident_attr_shrink(struct ntfs_inode *ni,
+ 		ntfs_release_delalloc_from(ni, first_free_vcn);
+ 
+ 		/* Truncate the runlist itself. */
++		ntfs_inode_invalidate_iomaps(ni);
+ 		if (ntfs_rl_truncate_nolock(vol, &ni->runlist, first_free_vcn)) {
+ 			/*
+ 			 * Failed to truncate the runlist, so just throw it
+@@ -4986,6 +4987,7 @@ static int ntfs_non_resident_attr_expand(struct ntfs_inode *ni, const s64 newsiz
+ 	 * dropping the lock: ntfs_attr_vcn_to_rl() fails a lookup below the
+ 	 * allocated size that falls past the end of the runlist.
+ 	 */
++	ntfs_inode_invalidate_iomaps(ni);
+ 	err2 = ntfs_rl_truncate_nolock(vol, &ni->runlist,
+ 			ntfs_bytes_to_cluster(vol, org_alloc_size));
+ 	if (!err2) {
+@@ -5991,6 +5993,7 @@ int ntfs_non_resident_attr_insert_range(struct ntfs_inode *ni, s64 start_vcn, s6
+ 	}
+ 	ni->runlist.rl =  rl;
+ 	ni->runlist.count = new_rl_count;
++	ntfs_inode_invalidate_iomaps(ni);
+ 
+ 	ni->allocated_size += ntfs_cluster_to_bytes(vol, len);
+ 	ni->data_size += ntfs_cluster_to_bytes(vol, len);
+@@ -6065,6 +6068,7 @@ int ntfs_non_resident_attr_collapse_range(struct ntfs_inode *ni, s64 start_vcn,
+ 	}
+ 	ni->runlist.rl = rl;
+ 	ni->runlist.count = new_rl_cnt;
++	ntfs_inode_invalidate_iomaps(ni);
+ 
+ 	ni->allocated_size -= ntfs_cluster_to_bytes(vol, len);
+ 	if (ni->data_size > ntfs_cluster_to_bytes(vol, start_vcn)) {
+@@ -6161,6 +6165,7 @@ int ntfs_non_resident_attr_punch_hole(struct ntfs_inode *ni, s64 start_vcn, s64
+ 	}
+ 	ni->runlist.rl = rl;
+ 	ni->runlist.count = new_rl_count;
++	ntfs_inode_invalidate_iomaps(ni);
+ 
+ 	ret = ntfs_attr_update_mapping_pairs_locked(ni, 0, ni);
+ 	up_write(&ni->runlist.lock);
+diff --git a/fs/ntfs/inode.c b/fs/ntfs/inode.c
+index 231f2799eb..3ae108b637 100644
+--- a/fs/ntfs/inode.c
++++ b/fs/ntfs/inode.c
+@@ -525,6 +525,7 @@ void __ntfs_init_inode(struct super_block *sb, struct ntfs_inode *ni)
+ 	ni->vol = NTFS_SB(sb);
+ 	atomic_set(&ni->stream_open_count, 0);
+ 	ntfs_init_runlist(&ni->runlist);
++	atomic64_set(&ni->iomap_seq, 0);
+ 	mutex_init(&ni->mrec_lock);
+ 	if (ni->type == AT_ATTRIBUTE_LIST) {
+ 		lockdep_set_class(&ni->mrec_lock,
+diff --git a/fs/ntfs/inode.h b/fs/ntfs/inode.h
+index 136062c9fb..0f874b8778 100644
+--- a/fs/ntfs/inode.h
++++ b/fs/ntfs/inode.h
+@@ -98,6 +98,13 @@ enum ntfs_inode_mutex_lock_class {
+  *   for a hole or delalloc run; a buffered write's ->iomap_valid() uses it.
+  * @target: symlink buffer.
+  * @linuxflags: Linux-specific file attributes loaded from the $LINUXFLAGS EA.
++ * @iomap_seq: bumped whenever clusters that are already mapped change place
++ *	or are freed, so that writeback does not reuse a cached mapping.
++ *	Unlike @alloc_seq it does not move when clusters are allocated:
++ *	writeback allocates clusters itself after reading it, and an
++ *	allocation does not change a mapping writeback has cached.  A
++ *	buffered write needs only @alloc_seq, as it holds the inode lock,
++ *	which keeps truncate, punch hole, collapse and insert range out.
+  */
+ struct ntfs_inode {
+ 	rwlock_t size_lock;
+@@ -112,6 +119,7 @@ struct ntfs_inode {
+ 	u32 name_len;
+ 	atomic_t stream_open_count;
+ 	struct runlist runlist;
++	atomic64_t iomap_seq;
+ 	s64 data_size;
+ 	s64 initialized_size;
+ 	s64 allocated_size;
+@@ -386,4 +394,29 @@ void ntfs_set_vfs_operations(struct inode *inode, mode_t mode, dev_t dev);
+ struct folio *ntfs_get_locked_folio(struct address_space *mapping,
+ 		pgoff_t index, pgoff_t end_index, struct file_ra_state *ra);
+ 
++/*
++ * Called with the runlist lock held for writing after mapped clusters of
++ * @ni were moved or released.
++ */
++static inline void ntfs_inode_invalidate_iomaps(struct ntfs_inode *ni)
++{
++	lockdep_assert_held_write(&ni->runlist.lock);
++	atomic64_inc(&ni->iomap_seq);
++}
++
++/* Read without the runlist lock, by writeback. */
++static inline u64 ntfs_inode_iomap_seq(struct ntfs_inode *ni)
++{
++	/*
++	 * Order the read after writeback's read of i_size: a truncate into the
++	 * middle of a folio unlocks the folio before it frees the clusters
++	 * past the new end, so the folio lock does not order the two reads,
++	 * and writeback that sees the file extended again after that truncate
++	 * must also see the counter it bumped.  Pairs with the release of the
++	 * runlist and inode locks after ntfs_inode_invalidate_iomaps().
++	 */
++	smp_rmb();
++	return atomic64_read(&ni->iomap_seq);
++}
++
+ #endif /* _LINUX_NTFS_INODE_H */
+diff --git a/fs/ntfs/iomap.c b/fs/ntfs/iomap.c
+index c61c996ea9..d1f23ae3d9 100644
+--- a/fs/ntfs/iomap.c
++++ b/fs/ntfs/iomap.c
+@@ -1119,10 +1119,24 @@ static loff_t ntfs_writeback_cluster_end(struct inode *inode,
+ static ssize_t ntfs_writeback_range(struct iomap_writepage_ctx *wpc,
+ 		struct folio *folio, u64 offset, unsigned int len, u64 end_pos)
+ {
++	struct ntfs_inode *ni = NTFS_I(wpc->inode);
++
++	/*
++	 * The cached mapping may span many folios. Clusters it covers can be
++	 * freed or shifted (truncate, punch hole, collapse or insert range)
++	 * while this writeback pass is running, so check that it is still
++	 * current before writing through it again.  A hole can be filled
++	 * meanwhile without any of that, so a hole is always mapped again:
++	 * dirty blocks can lie in one when a folio is dirtied as a whole
++	 * over clusters smaller than the folio.
++	 */
+ 	if (offset < wpc->iomap.offset ||
+-	    offset >= wpc->iomap.offset + wpc->iomap.length) {
++	    offset >= wpc->iomap.offset + wpc->iomap.length ||
++	    wpc->iomap.type == IOMAP_HOLE ||
++	    wpc->iomap.validity_cookie != ntfs_inode_iomap_seq(ni)) {
+ 		struct inode *inode = wpc->inode;
+-		loff_t end = min_t(loff_t, NTFS_I(inode)->allocated_size,
++		u64 seq = ntfs_inode_iomap_seq(ni);
++		loff_t end = min_t(loff_t, ni->allocated_size,
+ 				   offset + NTFS_WRITEBACK_MAP_MAX);
+ 		int ntfs_iomap_flags = NTFS_IOMAP_FLAGS_WRITEBACK;
+ 		bool zero;
+@@ -1139,6 +1153,7 @@ static ssize_t ntfs_writeback_range(struct iomap_writepage_ctx *wpc,
+ 						 ntfs_iomap_flags);
+ 		if (error)
+ 			return error;
++		wpc->iomap.validity_cookie = seq;
+ 	}
+ 
+ 	return iomap_add_to_ioend(wpc, folio, offset, end_pos, len);
+-- 
+2.56.1
+
