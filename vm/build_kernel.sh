@@ -3,13 +3,14 @@
 #
 # Build a kernel for the test VM from a source tree:
 #
-#   vm/build_kernel.sh SRC OUT [debug|fast]
+#   vm/build_kernel.sh SRC OUT [debug|lockdep|fast]
 #
 # Everything the VM needs is built in (virtio, 9p, loop, ntfs) except ntfs3,
 # which cannot be built in together with ntfs and is installed as a module
 # under OUT/modroot. Boot it with
 #   KERNEL=OUT/arch/x86/boot/bzImage MODULES=OUT/modroot/lib/modules/VERSION run_vm.sh ...
 # "debug" (default) adds KASAN, lockdep, UBSAN and the usual debug checks.
+# "lockdep" enables lock debugging and the lockup and hung task watchdogs.
 #
 # Compiler cache: when ccache is installed, compiles go through it (KCCACHE=0
 # turns it off). Kernel builds use their own cache, $KCCACHE_DIR (default
@@ -34,6 +35,10 @@
 set -euo pipefail
 case "${1:-}" in -h|--help|"") sed -n '3,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0;; esac
 src=$(realpath "$1"); out=$(realpath -m "$2"); flavour=${3:-debug}
+case "$flavour" in
+	debug|lockdep|fast) ;;
+	*) echo "flavour must be debug, lockdep or fast" >&2; exit 2 ;;
+esac
 mkdir -p "$out"
 cc=gcc
 if [ "${KCCACHE:-1}" != 0 ] && command -v ccache >/dev/null; then
@@ -71,6 +76,11 @@ if [ "$flavour" = debug ]; then
 	    -e DEBUG_VM -e DEBUG_PAGEALLOC -e PAGE_POISONING -e FAULT_INJECTION \
 	    -e FAILSLAB -e FAIL_PAGE_ALLOC -e FAULT_INJECTION_DEBUG_FS \
 	    -e KFENCE -e PANIC_ON_OOPS
+elif [ "$flavour" = lockdep ]; then
+	cfg -e PROVE_LOCKING -e DEBUG_RT_MUTEXES -e DEBUG_SPINLOCK \
+	    -e DEBUG_MUTEXES -e DEBUG_WW_MUTEX_SLOWPATH -e DEBUG_RWSEMS \
+	    -e DETECT_HUNG_TASK -e SOFTLOCKUP_DETECTOR \
+	    -e HARDLOCKUP_DETECTOR -e WQ_WATCHDOG
 fi
 make -C "$src" O="$out" CC="$cc" -s olddefconfig
 for o in NTFS_FS=y NTFS3_FS=m 9P_FS=y NET_9P_VIRTIO=y BLK_DEV_LOOP=y; do

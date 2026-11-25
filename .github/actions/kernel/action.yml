@@ -25,7 +25,7 @@ inputs:
     description: what vm/apply_patches.sh takes, separated by spaces or new lines
     default: ""
   flavour:
-    description: debug (KASAN, lockdep, UBSAN) or fast
+    description: debug (KASAN, lockdep, UBSAN), lockdep, or fast
     default: debug
   save-cache:
     description: "true: save the compiler cache after the build"

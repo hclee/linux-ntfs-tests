@@ -6,14 +6,16 @@
 # that fstests did not run ("not run") is a FAIL too.
 # Environment: FSTESTS (an xfstests tree built with fstests/patches
 # applied), FSTESTS_TESTS (the tests to run, default "generic/816
-# generic/817 generic/818"). The directory of NTFSCK (ntfsprogs-plus's sbin)
+# generic/817 generic/818"), FSTESTS_SECTIONS (section:cluster-size pairs),
+# and FSTESTS_ALLOW_NOTRUN (1 to report unsupported tests as SKIP).
+# The directory of NTFSCK (ntfsprogs-plus's sbin)
 # goes first in PATH: fstests runs mkfs.ntfs and fsck.ntfs from PATH, and
 # ntfs-3g's mkfs.ntfs must not take over.
 # Results: $W/fstests-results/<section>/ (check.log, result.xml and
 # <test>.full and <test>.out.bad of every test).
 . "$HARNESS/guest_lib.sh"
 TESTS=${FSTESTS_TESTS:-generic/816 generic/817 generic/818}
-SECTIONS="ntfs_512:512 ntfs_4k:4096 ntfs_64k:65536"
+SECTIONS=${FSTESTS_SECTIONS:-"ntfs_512:512 ntfs_4k:4096 ntfs_64k:65536"}
 if ! [ -x "${FSTESTS:-}/check" ]; then
 	fail "no fstests tree at '${FSTESTS:-}' (build xfstests with fstests/patches and set FSTESTS)"
 	echo "### done"
@@ -68,26 +70,31 @@ cat $W/check.out
 # one line per test and section, from the xunit report of each section
 for s in $SECTIONS; do
 	s=${s%%:*}
-	python3 - "$W/fstests-results/$s/result.xml" "$s" $TESTS <<'EOF'
+	python3 - "$W/fstests-results/$s/result.xml" "$s" "${FSTESTS_ALLOW_NOTRUN:-0}" $TESTS <<'EOF'
 import sys
 import xml.etree.ElementTree as ET
-path, section, tests = sys.argv[1], sys.argv[2], sys.argv[3:]
+path, section, allow_notrun, tests = sys.argv[1], sys.argv[2], sys.argv[3] == "1", sys.argv[4:]
 try:
     cases = {c.get("name"): c for c in ET.parse(path).getroot().iter("testcase")}
 except (OSError, ET.ParseError) as e:
     cases = {}
     print(f"FAIL: fstests {section}: no report ({e})")
+skipped = 0
 for t in tests:
     c = cases.get(t)
     if c is None:
         print(f"FAIL: {t} {section}: did not run")
     elif c.find("skipped") is not None:
-        print(f"FAIL: {t} {section}: not run: {c.find('skipped').get('message', '')}")
+        skipped += 1
+        status = "SKIP" if allow_notrun else "FAIL"
+        print(f"{status}: {t} {section}: not run: {c.find('skipped').get('message', '')}")
     elif c.find("failure") is not None or c.find("error") is not None:
         e = c.find("failure") if c.find("failure") is not None else c.find("error")
         print(f"FAIL: {t} {section}: {e.get('message', '')}")
     else:
         print(f"PASS: {t} {section}")
+if allow_notrun and skipped == len(tests):
+    print(f"FAIL: fstests {section}: all tests were skipped")
 EOF
 	for f in "$W"/fstests-results/$s/generic/*.out.bad; do
 		[ -f "$f" ] || continue

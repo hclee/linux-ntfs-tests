@@ -15,10 +15,11 @@
 # c*.img for the sparse_cu tests, default none: those parts are skipped),
 # XFSTESTS (an xfstests checkout with fsx built, for fsx_parallel.sh),
 # FSTESTS (a built xfstests tree with fstests/patches, for fstests_batch.sh),
-# CLUSTERS (default
-# "512 4096 16384 65536"), DMESG_IGNORE (see guest_lib.sh) and may source
-# guest_lib.sh. GUEST_ENV="VAR=value ..." exports more variables to the
-# guest script (e.g. GUEST_ENV="STAGE_CLUSTER=4096").
+# CLUSTERS (default "512 4096 16384 65536"), DMESG_IGNORE (see guest_lib.sh)
+# and may source guest_lib.sh. FSTESTS_TESTS selects cases for
+# fstests_batch.sh and xfstests_github.sh. GUEST_ENV="VAR=value ..." exports
+# more variables to the guest script (e.g. GUEST_ENV="STAGE_CLUSTER=4096").
+# The VM timeout defaults to 2400 seconds, or 18000 for xfstests_github.sh.
 # Output: WORKDIR/shell.log (bash -x of the guest script), WORKDIR/console.log.
 #
 # Example:
@@ -39,6 +40,7 @@ export NTFSINFO=$ntfsinfo
 export FIXTURES=${FIXTURES:-}
 export XFSTESTS=${XFSTESTS:-}
 export FSTESTS=${FSTESTS:-}
+export FSTESTS_TESTS="${FSTESTS_TESTS:-}"
 export CLUSTERS="${CLUSTERS:-512 4096 16384 65536}"
 export DMESG_IGNORE="${DMESG_IGNORE:-}"
 $(for kv in ${GUEST_ENV:-}; do printf 'export %q\n' "$kv"; done)
@@ -53,7 +55,9 @@ else
 	# the modules of this kernel; older releases may sit next to them
 	export MODULES="$build/modroot/lib/modules/$(cat "$build/include/config/kernel.release")"
 fi
-SCRIPT="$vm/vm_shell.py" TIMEOUT=${TIMEOUT:-2400} \
+timeout=${TIMEOUT:-2400}
+[ "${script##*/}" != xfstests_github.sh ] || timeout=${TIMEOUT:-18000}
+SCRIPT="$vm/vm_shell.py" TIMEOUT="$timeout" \
 	"$vm/run_vm.sh" "$work" > "$work/run.out" 2>&1 || true
 grep -E "^(FAIL|PASS|### done)" "$work/shell.log" || true
 grep -cE "^FAIL" "$work/shell.log" >/dev/null && exit 1 || exit 0

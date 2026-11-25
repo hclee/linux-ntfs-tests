@@ -129,6 +129,7 @@ its usage with `--help`.
 | slab_cache_names | slab cache names stay unique with both NTFS drivers loaded |
 | fsx_parallel | xfstests' fsx, 4 instances of 40000 operations in parallel on each cluster size, then ntfsck |
 | fstests_batch | the fstests in fstests/patches (generic/816 to 818) with FSTYP=ntfs, one section per cluster size 512, 4096 and 65536; one PASS or FAIL line per test and section, results in fstests-results/ |
+| xfstests_github | the 199 distinct generic tests from the GitHub NTFS test list, on a 4 KiB cluster volume; unsupported tests are reported as SKIP |
 | ntfs3_extent_records, ntfs3_readdir_large | fs/ntfs3: attribute lists and extents, large directories (need fs/ntfs3 built as configured by build_kernel.sh) |
 
 The suites run by `tests/run_kernel_tests.sh` need a kernel with the fs/ntfs
@@ -148,8 +149,19 @@ reproducer, Ubuntu 26.04, debug kernel):
 - patches: applied in order, separated by spaces; each is a lore link or
   message id (b4 fetches the whole series), the URL of an mbox or diff file,
   or a path in this repository such as `patches/v8-zero-for-a-killed-writer.diff`;
-- tests: reproducer names, `.sh` optional; empty runs all of them;
-- distro and flavour: Ubuntu 26.04, Arch Linux or both; debug or fast kernel.
+- tests: reproducer names, `.sh` optional; empty runs the default reproducers,
+  not `xfstests_github`;
+- distro and flavour: Ubuntu 26.04, Arch Linux or both; debug, lockdep or fast
+  kernel. Lockdep enables the locking and watchdog checks used by the
+  reference VM without KASAN or UBSAN.
+
+To run the larger xfstests selection, set `tests` to `xfstests_github` and
+`flavour` to `lockdep`. It uses the same patched xfstests build and tools as
+`fstests_batch`, and has a five-hour VM timeout and a six-hour job timeout.
+Set the `xfstests_tests` workflow input to a space-separated list such as
+`generic/001` to select individual cases. Skipped cases are listed in the
+workflow summary; an entirely skipped or incomplete run fails. Locally,
+`FSTESTS_TESTS=generic/001` selects a single case.
 
 The same from a shell, here v8 of the short write fix plus the proposed
 change on top of it:

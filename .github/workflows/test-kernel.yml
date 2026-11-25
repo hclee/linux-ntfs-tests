@@ -29,15 +29,18 @@ on:
       tests:
         description: Reproducers to run, separated by spaces (e.g. killed_write_mmap short_write_size); empty runs all
         default: ""
+      xfstests_tests:
+        description: xfstests cases to run, separated by spaces (e.g. generic/001); empty runs the xfstests_github selection
+        default: ""
       distro:
         description: Distribution the tests run on
         type: choice
         options: [ubuntu-26.04, arch, both]
         default: ubuntu-26.04
       flavour:
-        description: Kernel build (debug has KASAN, lockdep and UBSAN)
+        description: Kernel build (lockdep has locking and watchdog checks)
         type: choice
-        options: [debug, fast]
+        options: [debug, lockdep, fast]
         default: debug
 
 permissions:
@@ -58,7 +61,7 @@ jobs:
     container:
       image: ${{ matrix.distro == 'arch' && 'archlinux:latest' || '' }}
       options: --device /dev/kvm
-    timeout-minutes: 120
+    timeout-minutes: ${{ contains(inputs.tests, 'xfstests_github') && 360 || 120 }}
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/kernel
@@ -78,6 +81,7 @@ jobs:
           BASE: ${{ steps.kernel.outputs.sha }}
           FLAVOUR: ${{ inputs.flavour }}
           DISTRO: ${{ matrix.distro }}
+          FSTESTS_TESTS: ${{ inputs.xfstests_tests }}
         run: |
           export NTFSCK="$RUNNER_TEMP/ntfsprogs-plus-root/sbin/ntfsck"
           export NTFSINFO="$RUNNER_TEMP/ntfsprogs-plus-root/bin/ntfsinfo"
@@ -101,6 +105,13 @@ jobs:
             echo '```'
             cat results.txt
             echo '```'
+            if [ -f repro-out/xfstests_github/shell.log ]; then
+              echo "xfstests cases (including skipped cases):"
+              echo '```'
+              grep -E '^(PASS|FAIL|SKIP): (generic/|fstests ntfs_4k)' \
+                repro-out/xfstests_github/shell.log || true
+              echo '```'
+            fi
             echo "Logs: the reproducer-logs-$DISTRO artifact below."
           } | tee -a "$GITHUB_STEP_SUMMARY"  # the summary page and the log
           exit $rc
