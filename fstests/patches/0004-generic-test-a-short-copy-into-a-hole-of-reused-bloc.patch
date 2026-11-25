@@ -1,4 +1,4 @@
-From aa3bfac90bb2eec4f35e0fc55395982754044f03 Mon Sep 17 00:00:00 2001
+From e04ea2f2b1cb11de28b276e05300e20eb21cd733 Mon Sep 17 00:00:00 2001
 From: Ernest Borowski <ernest.borowski.git@proton.me>
 Date: Wed, 25 Nov 2026 00:13:31 +0100
 Subject: [PATCH 4/4] generic: test a short copy into a hole of reused blocks
@@ -18,18 +18,18 @@ compare the file with the expected contents after a remount.
 
 Link: https://lore.kernel.org/all/20261124-b4-ntfs-delalloc-fixes-v2-0-f394c800ec03@proton.me/
 ---
- tests/generic/818     | 56 +++++++++++++++++++++++++++++++++++++++++++
+ tests/generic/818     | 57 +++++++++++++++++++++++++++++++++++++++++++
  tests/generic/818.out |  2 ++
- 2 files changed, 58 insertions(+)
+ 2 files changed, 59 insertions(+)
  create mode 100755 tests/generic/818
  create mode 100644 tests/generic/818.out
 
 diff --git a/tests/generic/818 b/tests/generic/818
 new file mode 100755
-index 00000000..eef0aba5
+index 00000000..34a244a4
 --- /dev/null
 +++ b/tests/generic/818
-@@ -0,0 +1,56 @@
+@@ -0,0 +1,57 @@
 +#! /bin/bash
 +# SPDX-License-Identifier: GPL-2.0
 +# Copyright (c) 2026 Ernest Borowski.  All Rights Reserved.
@@ -66,20 +66,21 @@ index 00000000..eef0aba5
 +len=$((2 * blksz + blksz / 2))
 +file=$SCRATCH_MNT/file
 +
++# _scratch_cycle_mount sets $ret, so the write's result is kept in $written.
 +for copy in 1000 5096 12800; do
 +	$XFS_IO_PROG -f -c "pwrite -q -S 0xab 0 $size" -c fsync \
 +		-c "truncate 0" -c "truncate $size" \
 +		-c "pwrite -q -S 0x01 $((size - 1)) 1" $file
-+	ret=$($here/src/pwrite-short-copy $file $off $len $copy)
-+	echo "copy $copy: write of $len bytes at $off returned $ret" >> $seqres.full
++	written=$($here/src/pwrite-short-copy $file $off $len $copy)
++	echo "copy $copy: write of $len bytes at $off returned $written" >> $seqres.full
 +	$XFS_IO_PROG -c fsync $file
 +	_scratch_cycle_mount
 +
 +	rm -f $tmp.expected
 +	$XFS_IO_PROG -f -c "truncate $size" \
 +		-c "pwrite -q -S 0x01 $((size - 1)) 1" $tmp.expected
-+	[ "$ret" -gt 0 ] && \
-+		$XFS_IO_PROG -c "pwrite -q -S 0x5c $off $ret" $tmp.expected
++	[ "$written" -gt 0 ] && \
++		$XFS_IO_PROG -c "pwrite -q -S 0x5c $off $written" $tmp.expected
 +	cmp -s $file $tmp.expected || \
 +		echo "copy $copy: file contents differ after a short copy"
 +done
