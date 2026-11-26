@@ -165,6 +165,11 @@ workflow summary; an entirely skipped or incomplete run fails. Locally,
 `FSTESTS_TESTS=generic/001` selects a single case.
 The guest runs its own udev daemon on a private `/run` so device-mapper
 operations do not wait for the host's udev.
+For `xfstests_github`, the VM attaches two 10 GiB sparse disk images in the
+work directory, instead of keeping the test and scratch devices on tmpfs.
+The images are removed after the VM exits. Use a disk-backed work directory
+with enough free space: sparse images do not reserve their full capacity, and
+the GitHub-hosted runner may have less free space than their combined sizes.
 
 The same from a shell, here v8 of the short write fix plus the proposed
 change on top of it:

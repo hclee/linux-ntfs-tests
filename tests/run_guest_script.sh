@@ -33,6 +33,16 @@ ntfsck=${NTFSCK:-$(command -v ntfsck || echo ntfsck)}
 ntfsinfo=${NTFSINFO:-$(command -v ntfsinfo || echo ntfsinfo)}
 mkdir -p "$work"
 rm -f "$work/shell.log" "$work/console.log"
+unset FSTESTS_DISKS_DIR
+fstests_virtio_disks=0
+if [ "${script##*/}" = xfstests_github.sh ]; then
+	diskdir=$(mktemp -d "$work/fstests-disks.XXXXXXXX")
+	trap 'rm -f -- "$diskdir/test.img" "$diskdir/scratch.img"; rmdir -- "$diskdir"' EXIT
+	truncate -s 10G "$diskdir/test.img" "$diskdir/scratch.img"
+	export FSTESTS_DISKS_DIR=$diskdir
+	fstests_virtio_disks=1
+	df -h "$diskdir" > "$work/disk-usage.log"
+fi
 cat > "$work/cmds.sh" <<EOT
 export HARNESS=$here
 export NTFSCK=$ntfsck
@@ -41,6 +51,7 @@ export FIXTURES=${FIXTURES:-}
 export XFSTESTS=${XFSTESTS:-}
 export FSTESTS=${FSTESTS:-}
 export FSTESTS_TESTS="${FSTESTS_TESTS:-}"
+export FSTESTS_VIRTIO_DISKS=$fstests_virtio_disks
 export CLUSTERS="${CLUSTERS:-512 4096 16384 65536}"
 export DMESG_IGNORE="${DMESG_IGNORE:-}"
 $(for kv in ${GUEST_ENV:-}; do printf 'export %q\n' "$kv"; done)
@@ -59,5 +70,9 @@ timeout=${TIMEOUT:-2400}
 [ "${script##*/}" != xfstests_github.sh ] || timeout=${TIMEOUT:-18000}
 SCRIPT="$vm/vm_shell.py" TIMEOUT="$timeout" \
 	"$vm/run_vm.sh" "$work" > "$work/run.out" 2>&1 || true
+if [ "$fstests_virtio_disks" = 1 ]; then
+	du -h "$diskdir/test.img" "$diskdir/scratch.img" >> "$work/disk-usage.log"
+	df -h "$diskdir" >> "$work/disk-usage.log"
+fi
 grep -E "^(FAIL|PASS|### done)" "$work/shell.log" || true
 grep -cE "^FAIL" "$work/shell.log" >/dev/null && exit 1 || exit 0

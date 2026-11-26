@@ -21,6 +21,7 @@
 # MEM (3G), SMP (2), TIMEOUT (1800 s) and APPEND (more of the
 # kernel command line) size the VM. Needs KVM access and gcc with a static
 # libc (for the init program), not root. Output: WORKDIR/console.log.
+# FSTESTS_DISKS_DIR attaches its test.img and scratch.img as virtio disks.
 #
 # Example:
 #   KERNEL=../build/arch/x86/boot/bzImage MODULES=none vm/run_vm.sh /var/tmp/vmtest
@@ -51,9 +52,17 @@ done
 (cd "$ird" && find . | cpio -o -H newc --quiet) > "$work/initramfs.cpio"
 
 # --- boot ---------------------------------------------------------------------
+disks=()
+if [ -n "${FSTESTS_DISKS_DIR:-}" ]; then
+	for image in test.img scratch.img; do
+		path=${FSTESTS_DISKS_DIR//,/,,}/$image
+		disks+=(-drive "file=$path,if=virtio,format=raw,discard=unmap,detect-zeroes=unmap")
+	done
+fi
 timeout "${TIMEOUT:-1800}" qemu-system-x86_64 -enable-kvm -cpu host -m "${MEM:-3G}" -smp "${SMP:-2}" -nographic -no-reboot \
 	-kernel "$kernel" -initrd "$work/initramfs.cpio" \
 	-append "console=ttyS0 panic=-1 loglevel=4 mitigations=off ${APPEND:-} ntfsvm.work=$work ntfsvm.script=$script" \
+	"${disks[@]}" \
 	-virtfs local,path=/,mount_tag=root,security_model=none,readonly=on,multidevs=remap \
 	-virtfs local,path="$work",mount_tag=work,security_model=none,multidevs=remap \
 	| tee "$work/console.log" | grep -E '^\{|init:|BUG|Oops|ntfs' || true

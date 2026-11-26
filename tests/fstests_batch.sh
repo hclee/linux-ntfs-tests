@@ -44,12 +44,22 @@ mountpoint -q /tmp || mount -t tmpfs -o size=256m tmpfs /tmp
 # check and the tests write next to the tree; the host's root is read-only
 mkdir -p /mnt/xfstests
 tar -C "$FSTESTS" --exclude=.git -cf - . | tar -C /mnt/xfstests -xf -
-# a 512 MiB test device and a 1 GiB scratch device (generic/816 fills a
-# 512 MiB volume), sparse files on the tmpfs
-truncate -s 512M /mnt/test.img
-truncate -s 1G /mnt/scratch.img
-tdev=$(losetup -f --show /mnt/test.img)
-sdev=$(losetup -f --show /mnt/scratch.img)
+if [ "${FSTESTS_VIRTIO_DISKS:-0}" = 1 ]; then
+	tdev=/dev/vda
+	sdev=/dev/vdb
+	if ! [ -b "$tdev" ] || ! [ -b "$sdev" ]; then
+		fail "fstests virtio disks are missing"
+		echo "### done"
+		exit 0
+	fi
+	echo "fstests disk sizes: $(blockdev --getsize64 "$tdev") $(blockdev --getsize64 "$sdev")"
+else
+	# generic/816 fills a 512 MiB volume.
+	truncate -s 512M /mnt/test.img
+	truncate -s 1G /mnt/scratch.img
+	tdev=$(losetup -f --show /mnt/test.img)
+	sdev=$(losetup -f --show /mnt/scratch.img)
+fi
 mkdir -p /mnt/fstests/test /mnt/fstests/scratch
 mkfs.ntfs -Q -F -q "$tdev" > /dev/null
 # every section sets every option: check carries options over from the
@@ -111,6 +121,6 @@ EOF
 		diff -u /mnt/xfstests/tests/generic/$t.out "$f" | head -30
 	done
 done
-losetup -d "$tdev" "$sdev"
+[ "${FSTESTS_VIRTIO_DISKS:-0}" = 1 ] || losetup -d "$tdev" "$sdev"
 dmesg_check
 echo "### done"
