@@ -29,6 +29,14 @@ for p in mkfs.ntfs fsck.ntfs; do
 	*) fail "$p is '$(command -v $p)', not the one in $sbin" ;;
 	esac
 done
+# The host's udev socket cannot handle device events from this VM.
+if ! mount -t tmpfs -o mode=0755 tmpfs /run ||
+   ! timeout 10 /usr/lib/systemd/systemd-udevd --daemon ||
+   ! udevadm control --timeout=10 --ping; then
+	fail "could not start guest udev"
+	echo "### done"
+	exit 0
+fi
 mountpoint -q /mnt || mount -t tmpfs -o size=2500m tmpfs /mnt
 # check and the tests keep their temporary files in /tmp, which is the
 # host's, read-only (TMPDIR does not reach the guest scripts)

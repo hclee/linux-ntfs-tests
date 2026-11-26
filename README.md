@@ -33,6 +33,7 @@ ntfs-next is expected to give, and CI flags any test whose result changes.
   of the commit in `fstests/base` with `git am fstests/patches/*.patch` on
   top (fstests tests not merged upstream yet, and FSTYP=ntfs support), and
   ntfsprogs-plus installed with its `mkfs.ntfs` and `fsck.ntfs` links.
+  The VM also needs systemd-udevd and udevadm for device-mapper tests.
 
 Debian or Ubuntu (Ubuntu 26.04 is tested in CI):
 
@@ -162,6 +163,8 @@ Set the `xfstests_tests` workflow input to a space-separated list such as
 `generic/001` to select individual cases. Skipped cases are listed in the
 workflow summary; an entirely skipped or incomplete run fails. Locally,
 `FSTESTS_TESTS=generic/001` selects a single case.
+The guest runs its own udev daemon on a private `/run` so device-mapper
+operations do not wait for the host's udev.
 
 The same from a shell, here v8 of the short write fix plus the proposed
 change on top of it:
