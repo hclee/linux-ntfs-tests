@@ -37,6 +37,11 @@ if ! mount -t tmpfs -o mode=0755 tmpfs /run ||
 	echo "### done"
 	exit 0
 fi
+if ! ip link set lo up; then
+	fail "could not enable guest loopback"
+	echo "### done"
+	exit 0
+fi
 mountpoint -q /mnt || mount -t tmpfs -o size=2500m tmpfs /mnt
 # check and the tests keep their temporary files in /tmp, which is the
 # host's, read-only (TMPDIR does not reach the guest scripts)

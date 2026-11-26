@@ -45,7 +45,7 @@ runs:
         pacman -Syu --noconfirm --needed qemu-base gcc make cpio python zstd xz bc bison \
           flex libelf openssl ccache perl kmod pahole ntfs-3g ntfsprogs xfsprogs autoconf \
           automake libtool pkgconf util-linux-libs gnutls libgcrypt git attr acl b4 \
-          libaio liburing libcap gawk psmisc inetutils systemd
+          libaio liburing libcap gawk psmisc inetutils iproute2 systemd
     - name: Packages and KVM access (Ubuntu)
       if: inputs.distro != 'arch'
       shell: bash
@@ -56,7 +56,7 @@ runs:
           dwarves ntfs-3g xfsprogs autoconf automake libtool pkg-config libblkid-dev \
           uuid-dev libgnutls28-dev libgcrypt20-dev git ca-certificates attr b4 \
           xfslibs-dev libacl1-dev libaio-dev liburing-dev libcap-dev gawk psmisc \
-          uuid-runtime udev
+          uuid-runtime iproute2 udev
         echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' |
           sudo tee /etc/udev/rules.d/99-kvm4all.rules
         sudo udevadm control --reload-rules
