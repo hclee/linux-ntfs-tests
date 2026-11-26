@@ -41,6 +41,19 @@ mountpoint -q /mnt || mount -t tmpfs -o size=2500m tmpfs /mnt
 # check and the tests keep their temporary files in /tmp, which is the
 # host's, read-only (TMPDIR does not reach the guest scripts)
 mountpoint -q /tmp || mount -t tmpfs -o size=256m tmpfs /tmp
+if ! [ -d /dev/fd ]; then
+	ln -s /proc/self/fd /dev/fd || {
+		fail "could not create /dev/fd"
+		echo "### done"
+		exit 0
+	}
+fi
+# Some fstests invoke mount directly, without the configured -i option.
+mount_prog=$(command -v mount)
+mkdir -p /tmp/fstests-bin
+printf '#!/bin/sh\nexec "%s" -i "$@"\n' "$mount_prog" > /tmp/fstests-bin/mount
+chmod +x /tmp/fstests-bin/mount
+export PATH=/tmp/fstests-bin:$PATH
 # check and the tests write next to the tree; the host's root is read-only
 mkdir -p /mnt/xfstests
 tar -C "$FSTESTS" --exclude=.git -cf - . | tar -C /mnt/xfstests -xf -
