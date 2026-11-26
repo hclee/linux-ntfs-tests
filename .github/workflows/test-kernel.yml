@@ -5,7 +5,7 @@
 #   gh workflow run test-kernel.yml -R OWNER/linux-ntfs \
 #     -f patches="https://lore.kernel.org/all/MESSAGE-ID/" -f tests="killed_write_mmap"
 # Every field has a working default (plain ntfs-next, every reproducer, Ubuntu
-# 26.04, debug kernel). The run's summary page shows the base commit, the
+# 24.04, debug kernel). The run's summary page shows the base commit, the
 # patches applied and one result line per test; the logs are artifacts. In a
 # fork, enable Actions on its Actions tab first.
 name: test-kernel
@@ -35,8 +35,8 @@ on:
       distro:
         description: Distribution the tests run on
         type: choice
-        options: [ubuntu-26.04, arch, both]
-        default: ubuntu-26.04
+        options: [ubuntu-24.04, ubuntu-26.04, arch, both]
+        default: ubuntu-24.04
       flavour:
         description: Kernel build (lockdep has locking and watchdog checks)
         type: choice
@@ -55,9 +55,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        distro: ${{ fromJSON(inputs.distro == 'both' && '["arch", "ubuntu-26.04"]' || format('["{0}"]', inputs.distro)) }}
+        distro: ${{ fromJSON(inputs.distro == 'both' && '["arch", "ubuntu-24.04"]' || format('["{0}"]', inputs.distro)) }}
     name: test (${{ matrix.distro }})
-    runs-on: ubuntu-26.04
+    runs-on: ${{ matrix.distro == 'ubuntu-26.04' && 'ubuntu-26.04' || 'ubuntu-24.04' }}
     container:
       image: ${{ matrix.distro == 'arch' && 'archlinux:latest' || '' }}
       options: --device /dev/kvm

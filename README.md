@@ -144,7 +144,7 @@ The `test-kernel` workflow builds any kernel, with any patches on top, and
 runs the reproducers on it, with nothing installed locally. On the
 repository's Actions tab pick test-kernel, then Run workflow, and fill in
 what you need; every field has a working default (plain ntfs-next, every
-reproducer, Ubuntu 26.04, debug kernel):
+reproducer, Ubuntu 24.04, debug kernel):
 
 - repo and ref: a kernel git repository and a branch, tag or commit id in it;
 - patches: applied in order, separated by spaces; each is a lore link or
@@ -152,9 +152,9 @@ reproducer, Ubuntu 26.04, debug kernel):
   or a path in this repository such as `patches/v8-zero-for-a-killed-writer.diff`;
 - tests: reproducer names, `.sh` optional; empty runs the default reproducers,
   not `xfstests_github`;
-- distro and flavour: Ubuntu 26.04, Arch Linux or both; debug, lockdep or fast
-  kernel. Lockdep enables the locking and watchdog checks used by the
-  reference VM without KASAN or UBSAN.
+- distro and flavour: Ubuntu 24.04, Ubuntu 26.04, Arch Linux or both (Arch
+  and Ubuntu 24.04); debug, lockdep or fast kernel. Lockdep enables the
+  locking and watchdog checks used by the reference VM without KASAN or UBSAN.
 
 To run the larger xfstests selection, set `tests` to `xfstests_github` and
 `flavour` to `lockdep`. It uses the same patched xfstests build and tools as

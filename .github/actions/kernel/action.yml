@@ -13,7 +13,7 @@ name: kernel
 description: Install the test tools, fetch, patch and build a kernel for the reproducers
 inputs:
   distro:
-    description: arch (the job runs in an archlinux container) or ubuntu-26.04
+    description: arch (the job runs in an archlinux container) or Ubuntu
     required: true
   repo:
     description: kernel git repository
