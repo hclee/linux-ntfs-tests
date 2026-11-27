@@ -1,0 +1,82 @@
+diff --git a/fs/ntfs/super.c b/fs/ntfs/super.c
+index 39ff56cecf62..85cde97d09c2 100644
+--- a/fs/ntfs/super.c
++++ b/fs/ntfs/super.c
+@@ -24,6 +24,7 @@
+ #include "bitmap.h"
+ #include "volume.h"
+ #include "stream.h"
++#include "time.h"
+ 
+ /* A global default upcase table and a corresponding reference count. */
+ static __le16 *default_upcase;
+@@ -2761,6 +2762,8 @@ static int ntfs_fill_super(struct super_block *sb, struct fs_context *fc)
+ 	sb->s_maxbytes = MAX_LFS_FILESIZE;
+ 	/* Ntfs measures time in 100ns intervals. */
+ 	sb->s_time_gran = 100;
++	sb->s_time_min = NTFS_TIME_MIN;
++	sb->s_time_max = NTFS_TIME_MAX;
+ 
+ 	sb->s_xattr = ntfs_xattr_handlers;
+ 	/*
+diff --git a/fs/ntfs/time.h b/fs/ntfs/time.h
+index aeed195bdcda..1083b8c4910c 100644
+--- a/fs/ntfs/time.h
++++ b/fs/ntfs/time.h
+@@ -8,10 +8,15 @@
+ #ifndef _LINUX_NTFS_TIME_H
+ #define _LINUX_NTFS_TIME_H
+ 
++#include <linux/limits.h>
+ #include <linux/time.h>
+-#include <asm/div64.h>		/* For do_div(). */
+ 
+ #define NTFS_TIME_OFFSET ((s64)(369 * 365 + 89) * 24 * 3600)
++#define NTFS_TICKS_PER_SEC 10000000
++/* Keep every tick within each supported second representable. */
++#define NTFS_TIME_MIN (S64_MIN / NTFS_TICKS_PER_SEC - NTFS_TIME_OFFSET)
++#define NTFS_TIME_MAX ((S64_MAX - (NTFS_TICKS_PER_SEC - 1)) / \
++		       NTFS_TICKS_PER_SEC - NTFS_TIME_OFFSET)
+ 
+ /*
+  * utc2ntfs - convert Linux UTC time to NTFS time
+@@ -32,10 +37,9 @@
+ static inline __le64 utc2ntfs(const struct timespec64 ts)
+ {
+ 	/*
+-	 * Convert the seconds to 100ns intervals, add the nano-seconds
+-	 * converted to 100ns intervals, and then add the NTFS time offset.
++	 * Add the epoch offset, then convert seconds and nanoseconds to ticks.
+ 	 */
+-	return cpu_to_le64((u64)(ts.tv_sec + NTFS_TIME_OFFSET) * 10000000 +
++	return cpu_to_le64(((u64)ts.tv_sec + NTFS_TIME_OFFSET) * NTFS_TICKS_PER_SEC +
+ 			ts.tv_nsec / 100);
+ }
+ 
+@@ -72,16 +76,17 @@ static inline __le64 get_current_ntfs_time(void)
+ static inline struct timespec64 ntfs2utc(const __le64 time)
+ {
+ 	struct timespec64 ts;
+-	s32 t32;
++	u64 raw = le64_to_cpu(time);
++	bool negative = raw & (1ULL << 63);
++	/* Unsigned negation also handles the minimum signed tick value. */
++	u64 magnitude = negative ? -raw : raw;
++	u32 remainder;
++	s64 seconds = div_u64_rem(magnitude, NTFS_TICKS_PER_SEC, &remainder);
++	s64 nanoseconds = (s64)remainder * 100;
+ 
+-	/* Subtract the NTFS time offset. */
+-	s64 t = le64_to_cpu(time) - NTFS_TIME_OFFSET * 10000000;
+-	/*
+-	 * Convert the time to 1-second intervals and the remainder to
+-	 * 1-nano-second intervals.
+-	 */
+-	ts.tv_sec = div_s64_rem(t, 10000000, &t32);
+-	ts.tv_nsec = t32 * 100;
++	seconds = negative ? -seconds : seconds;
++	nanoseconds = negative ? -nanoseconds : nanoseconds;
++	set_normalized_timespec64(&ts, seconds - NTFS_TIME_OFFSET, nanoseconds);
+ 	return ts;
+ }
+ #endif /* _LINUX_NTFS_TIME_H */
